@@ -1,0 +1,221 @@
+/* ═══════════════════════════════════════════════════════════════════
+   OG REVISE — MODERN SKIN  (og-modern.css)
+   Additive polish layer over the existing app. It only ever OVERRIDES
+   presentation — no selector here removes functionality, and every
+   original class keeps working. Safe to delete to return to the old
+   look.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── ambient depth behind everything ─────────────────────────────── */
+#app{position:relative}
+#app::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(55% 40% at 85% -5%, rgba(0,212,255,0.055), transparent 60%),
+    radial-gradient(45% 45% at -10% 110%, rgba(139,92,246,0.06), transparent 60%),
+    radial-gradient(30% 30% at 55% 115%, rgba(0,229,192,0.045), transparent 60%);}
+
+/* ── header: glass + gradient hairline ───────────────────────────── */
+#hd{background:rgba(8,15,30,0.82);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border-bottom:1px solid transparent;
+  border-image:linear-gradient(90deg,transparent,rgba(0,212,255,0.35),rgba(0,229,192,0.3),rgba(139,92,246,0.3),transparent) 1;}
+.logo-icon{background:transparent;border-radius:0;width:38px;height:38px}
+.logo-icon svg{width:38px;height:38px;display:block;filter:drop-shadow(0 0 10px rgba(0,212,255,0.35))}
+.logo-text{letter-spacing:0.03em;
+  background:linear-gradient(92deg,#00d4ff 5%,#00e5c0 60%,#8b5cf6 110%);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.logo-sub{letter-spacing:0.08em;text-transform:uppercase;font-size:9px}
+
+/* search field focus glow */
+.search-wrap input:focus{box-shadow:0 0 0 4px rgba(0,212,255,0.10)}
+
+/* ── sidebar refinement ──────────────────────────────────────────── */
+#sb{background:rgba(8,15,30,0.6);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.tab{transition:all 0.18s cubic-bezier(0.4,0,0.2,1)}
+.tab.on{box-shadow:0 6px 18px rgba(0,212,255,0.16)}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-thumb{background:linear-gradient(#1a2545,#263660);border-radius:6px}
+::-webkit-scrollbar-thumb:hover{background:#2c4070}
+
+/* ── welcome hero ────────────────────────────────────────────────── */
+#welcome{position:relative}
+.w-badge{border:1px solid rgba(0,212,255,0.3);
+  background:linear-gradient(90deg,rgba(0,212,255,0.10),rgba(0,229,192,0.08));
+  box-shadow:0 0 26px rgba(0,212,255,0.10) inset}
+.w-title{letter-spacing:-0.02em}
+.w-title span{background:linear-gradient(92deg,#00d4ff,#00e5c0 55%,#8b5cf6);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.stat{transition:transform 0.22s cubic-bezier(0.34,1.56,0.64,1),box-shadow 0.22s,border-color 0.22s;
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.stat:hover{transform:translateY(-4px);border-color:rgba(0,212,255,0.35);
+  box-shadow:0 14px 34px rgba(0,0,0,0.35),0 0 0 1px rgba(0,212,255,0.12)}
+
+/* signed-in status card (cloud mode only) */
+#w-cloud-card{display:none}
+html.og-cloud #w-cloud-card{display:inline-flex;align-items:center;gap:14px;
+  margin:4px auto 10px;padding:14px 22px;border-radius:18px;text-align:left;
+  background:rgba(13,21,41,0.75);border:1px solid rgba(0,229,192,0.22);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  box-shadow:0 12px 34px rgba(0,0,0,0.35)}
+#w-cloud-card .wcc-ico{width:38px;height:38px;border-radius:12px;flex-shrink:0;
+  background:linear-gradient(135deg,rgba(0,212,255,0.16),rgba(0,229,192,0.14));
+  border:1px solid rgba(0,212,255,0.25);display:flex;align-items:center;justify-content:center;font-size:17px}
+#w-cloud-card .wcc-t1{font-size:13px;font-weight:700;color:var(--t1)}
+#w-cloud-card .wcc-t1 [data-og-email]{color:var(--teal)}
+#w-cloud-card .wcc-t2{font-size:11px;color:var(--t3);margin-top:2px}
+
+/* in cloud mode the old manual-setup instructions are obsolete */
+html.og-cloud .setup-box{display:none}
+
+/* ── content cards ───────────────────────────────────────────────── */
+.icard{transition:transform 0.22s cubic-bezier(0.34,1.56,0.64,1),box-shadow 0.25s,border-color 0.25s}
+.icard:hover{transform:translateY(-4px) scale(1.012);
+  border-color:rgba(0,212,255,0.35);
+  box-shadow:0 18px 44px rgba(0,0,0,0.45),0 0 24px rgba(0,212,255,0.08)}
+.mode-btn,.btn,.vb{transition:all 0.16s cubic-bezier(0.4,0,0.2,1)}
+.mode-btn:active,.btn:active{transform:scale(0.97)}
+
+/* drive pill breathing while connected */
+#drive-status-btn.connected #drive-status-dot{animation:ogc-breathe 2.6s ease-in-out infinite}
+@keyframes ogc-breathe{0%,100%{opacity:1}50%{opacity:0.45}}
+
+/* ── settings panel: cloud account card ──────────────────────────── */
+html.og-cloud #sp-sec-cid,html.og-cloud #sp-sec-fid{display:none}
+.ogc-acct{background:linear-gradient(160deg,rgba(0,212,255,0.06),rgba(139,92,246,0.05));
+  border:1px solid rgba(0,212,255,0.18);border-radius:16px;padding:16px;margin-bottom:14px}
+.ogc-acct-row{display:flex;align-items:center;gap:12px}
+.ogc-avatar{width:40px;height:40px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,#00d4ff,#00e5c0);color:#04121d;
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px}
+.ogc-acct-mail{font-size:13px;font-weight:700;color:var(--t1);word-break:break-all}
+.ogc-acct-sub{font-size:11px;color:var(--t3);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ogc-dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0}
+.ogc-dot.ok{background:var(--green);box-shadow:0 0 8px rgba(16,185,129,0.8)}
+.ogc-dot.no{background:var(--amber)}
+.ogc-acct-btns{display:flex;gap:8px;margin-top:14px}
+.ogc-btn{flex:1;padding:9px 12px;border-radius:10px;font-size:12px;font-weight:700;
+  font-family:var(--font);cursor:pointer;border:1px solid rgba(0,212,255,0.3);
+  background:rgba(0,212,255,0.08);color:var(--cyan);transition:all 0.15s;-webkit-tap-highlight-color:transparent}
+.ogc-btn:hover{background:rgba(0,212,255,0.15)}
+.ogc-btn.danger{border-color:rgba(244,63,94,0.35);background:rgba(244,63,94,0.07);color:var(--rose)}
+.ogc-btn.danger:hover{background:rgba(244,63,94,0.14)}
+.ogc-acct-note{font-size:10.5px;color:var(--t4);line-height:1.6;margin-top:12px}
+
+/* ── entrance animations (JS adds .og-in to welcome children) ────── */
+@media (prefers-reduced-motion: no-preference){
+  .og-pre{opacity:0;transform:translateY(16px)}
+  .og-in{opacity:1;transform:none;transition:opacity 0.6s ease,transform 0.6s cubic-bezier(0.22,1,0.36,1)}
+}
+
+/* ── toast: glass ────────────────────────────────────────────────── */
+#toast{backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+
+/* ═══════════════════════════════════════════════════════════════════
+   NEXT LAYER — Today dashboard · heatmap · command palette · view
+   transitions (companion styles for og-next.js)
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── hero actions ── */
+.dash-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:6px 0 22px}
+.dash-cta{display:inline-flex;align-items:center;gap:9px;padding:13px 22px;border:none;border-radius:16px;
+  font-family:var(--font);font-size:14px;font-weight:800;cursor:pointer;color:#04121d;
+  background:linear-gradient(93deg,var(--cyan),var(--teal));
+  box-shadow:0 10px 30px rgba(0,212,255,0.25);transition:transform .16s,box-shadow .2s,filter .2s;
+  -webkit-tap-highlight-color:transparent}
+.dash-cta:hover{transform:translateY(-2px);filter:brightness(1.07);box-shadow:0 14px 38px rgba(0,212,255,0.38)}
+.dash-cta:active{transform:scale(0.98)}
+.dash-cta.sm{padding:9px 16px;font-size:12.5px;border-radius:11px;flex:1}
+.dash-chip{background:rgba(4,18,29,0.25);border-radius:20px;padding:3px 10px;font-size:11px;font-family:var(--mono);font-weight:700}
+.dash-ghost{display:inline-flex;align-items:center;gap:7px;padding:12px 16px;border-radius:16px;cursor:pointer;
+  font-family:var(--font);font-size:13px;font-weight:600;color:var(--t2);
+  background:rgba(255,255,255,0.04);border:1px solid rgba(120,160,255,0.16);
+  transition:all .16s;-webkit-tap-highlight-color:transparent}
+.dash-ghost:hover{background:rgba(255,255,255,0.08);border-color:rgba(0,212,255,0.35);color:var(--t1)}
+.dash-ghost kbd{font-family:var(--mono);font-size:10px;background:var(--bg-4);border-radius:5px;padding:2px 6px;color:var(--t3)}
+
+/* ── dashboard grid ── */
+.dash-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;
+  width:100%;max-width:880px;margin:0 auto 26px;text-align:left}
+.dash-card{position:relative;background:rgba(13,21,41,0.7);border:1px solid rgba(120,160,255,0.12);
+  border-radius:20px;padding:18px 20px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  transition:transform .22s cubic-bezier(.34,1.56,.64,1),border-color .22s,box-shadow .25s}
+.dash-card:hover{transform:translateY(-3px);border-color:rgba(0,212,255,0.28);box-shadow:0 16px 40px rgba(0,0,0,0.35)}
+.dash-card.wide{grid-column:1 / -1}
+.dash-lbl{font-size:11px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;color:var(--t3);
+  display:flex;align-items:center;gap:6px}
+.dash-lbl-hint{margin-left:auto;font-weight:500;text-transform:none;letter-spacing:0;font-size:10px;color:var(--t4)}
+.dash-big{font-size:44px;font-weight:800;font-family:var(--mono);margin:8px 0 2px;line-height:1;
+  background:linear-gradient(92deg,var(--cyan),var(--teal));
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.dash-sub{font-size:11.5px;color:var(--t3);line-height:1.6}
+.dash-edit{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--t4);
+  font-size:13px;cursor:pointer;padding:4px;border-radius:8px;transition:color .15s}
+.dash-edit:hover{color:var(--cyan)}
+.dash-input{width:100%;box-sizing:border-box;background:var(--bg-0);border:1.5px solid var(--bg-4);
+  border-radius:11px;padding:10px 12px;color:var(--t1);font-family:var(--font);font-size:13px;
+  outline:none;margin-top:9px;transition:border-color .2s;color-scheme:dark}
+.dash-input:focus{border-color:var(--cyan)}
+/* exam urgency tones */
+.dash-card.exam-warm .dash-big{background:linear-gradient(92deg,var(--amber),#fbbf24);
+  -webkit-background-clip:text;background-clip:text}
+.dash-card.exam-hot{border-color:rgba(244,63,94,0.35)}
+.dash-card.exam-hot .dash-big{background:linear-gradient(92deg,var(--rose),#fb7185);
+  -webkit-background-clip:text;background-clip:text}
+.dash-card.exam-hot .dash-lbl{color:var(--rose)}
+
+/* ── mastery bars ── */
+.mast-row{display:flex;align-items:center;gap:12px;margin-top:12px}
+.mast-tag{width:38px;font-size:10.5px;font-weight:800;font-family:var(--mono);color:var(--t3);letter-spacing:0.06em}
+.mast-bar{flex:1;height:10px;border-radius:6px;background:rgba(255,255,255,0.06);overflow:hidden;display:flex}
+.mast-bar i{display:block;height:100%;transition:width .8s cubic-bezier(.22,1,.36,1)}
+.mast-bar i.m{background:linear-gradient(90deg,var(--teal),var(--green))}
+.mast-bar i.l{background:linear-gradient(90deg,rgba(245,158,11,0.85),rgba(245,158,11,0.5))}
+.mast-pct{width:42px;text-align:right;font-size:12px;font-weight:700;font-family:var(--mono);color:var(--teal)}
+
+/* ── activity heatmap ── */
+.dash-heat-wrap{overflow-x:auto;padding:10px 0 6px;-webkit-overflow-scrolling:touch}
+#dash-heat-grid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,11px);
+  grid-auto-columns:11px;gap:3px;width:max-content}
+#dash-heat-grid i{border-radius:3px;background:rgba(255,255,255,0.05)}
+#dash-heat-grid i[data-l="1"]{background:rgba(0,212,255,0.25)}
+#dash-heat-grid i[data-l="2"]{background:rgba(0,212,255,0.45)}
+#dash-heat-grid i[data-l="3"]{background:rgba(0,229,192,0.7)}
+#dash-heat-grid i[data-l="4"]{background:var(--teal);box-shadow:0 0 6px rgba(0,229,192,0.5)}
+
+/* ── command palette ── */
+#og-pal{position:fixed;inset:0;z-index:9000;display:none}
+#og-pal.on{display:block}
+#og-pal .pal-back{position:absolute;inset:0;background:rgba(2,5,10,0.6);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+#og-pal .pal-box{position:relative;margin:12vh auto 0;width:min(560px,92vw);border-radius:20px;overflow:hidden;
+  background:rgba(10,17,33,0.92);border:1px solid rgba(120,160,255,0.2);
+  box-shadow:0 40px 100px rgba(0,0,0,0.6),0 0 0 1px rgba(0,212,255,0.06)}
+.pal-inrow{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid rgba(120,160,255,0.1)}
+.pal-glass{color:var(--cyan);font-size:16px}
+#pal-in{flex:1;background:none;border:none;outline:none;color:var(--t1);font-family:var(--font);font-size:15px}
+#pal-in::placeholder{color:var(--t4)}
+#og-pal kbd{font-family:var(--mono);font-size:10px;background:var(--bg-4);border-radius:5px;padding:2px 7px;color:var(--t3)}
+#pal-list{max-height:46vh;overflow-y:auto;padding:8px}
+.pal-item{display:flex;align-items:center;gap:12px;padding:11px 13px;border-radius:12px;cursor:pointer;transition:background .1s}
+.pal-item.on{background:rgba(0,212,255,0.1)}
+.pal-ico{width:22px;text-align:center;font-size:14px;flex-shrink:0}
+.pal-nm{font-size:13.5px;font-weight:600;color:var(--t1);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pal-hint{font-size:10.5px;color:var(--t4);font-family:var(--mono);flex-shrink:0;max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pal-none{padding:26px;text-align:center;color:var(--t3);font-size:13px}
+.pal-foot{display:flex;gap:16px;justify-content:center;padding:10px;border-top:1px solid rgba(120,160,255,0.08);
+  font-size:10px;color:var(--t4)}
+
+/* ── view transitions (whole-page cross-fade + lift) ── */
+@media (prefers-reduced-motion: no-preference){
+  ::view-transition-old(root){animation:ogvt-out .16s ease both}
+  ::view-transition-new(root){animation:ogvt-in .26s cubic-bezier(.22,1,.36,1) both}
+}
+@keyframes ogvt-out{to{opacity:0}}
+@keyframes ogvt-in{from{opacity:0;transform:translateY(10px) scale(0.995)}to{opacity:1;transform:none}}
+
+/* header palette button: icon-only on small screens */
+@media (max-width:768px){ #hdr-pal-btn .palk{display:none} }
+@media (max-width:640px){
+  .dash-grid{grid-template-columns:1fr}
+  .dash-actions{gap:8px}
+  .dash-cta{width:100%;justify-content:center}
+}
