@@ -292,7 +292,7 @@
   function verifyCode() {
     var el = document.getElementById('ogg-code');
     var code = (el && el.value || '').replace(/\D/g, '');
-    if (code.length < 6) { gateError('Enter the 6-digit code from your email'); return; }
+    if (code.length < 4) { gateError('Enter the code from your email'); return; }
     gateBusy(true);
     sb.auth.verifyOtp({ email: lastEmailSentTo, token: code, type: 'email' })
       .then(function (r) {
@@ -385,8 +385,9 @@
     var cd = document.getElementById('ogg-code');
     if (cd) cd.addEventListener('keydown', function (e) { if (e.key === 'Enter') verifyCode(); });
     if (cd) cd.addEventListener('input', function () {
-      cd.value = cd.value.replace(/\D/g, '').slice(0, 6);
-      if (cd.value.length === 6) verifyCode();
+      /* Supabase's OTP length is configurable per-project (6-10 digits) —
+         accept whatever arrives rather than assuming 6. */
+      cd.value = cd.value.replace(/\D/g, '').slice(0, 10);
     });
   }
   function on(id, fn) { var n = document.getElementById(id); if (n) n.addEventListener('click', fn); }
@@ -422,8 +423,8 @@
         '</div>' +
 
         '<div class="ogg-state" id="ogg-s-code" style="display:none">' +
-          '<div class="ogg-sub" style="margin-bottom:14px">A 6-digit code is on its way to<br><b id="ogg-sent-to"></b></div>' +
-          '<input id="ogg-code" class="ogg-input code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="······" maxlength="6">' +
+          '<div class="ogg-sub" style="margin-bottom:14px">A sign-in code is on its way to<br><b id="ogg-sent-to"></b></div>' +
+          '<input id="ogg-code" class="ogg-input code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="········" maxlength="10">' +
           '<button class="ogg-btn primary" id="ogg-verify-btn">Unlock&nbsp;→</button>' +
           '<div class="ogg-err" id="ogg-error2"></div>' +
           '<button class="ogg-link" id="ogg-resend-btn">Use a different email / resend</button>' +
@@ -501,7 +502,7 @@
       'border:1.5px solid #1e2d50;border-radius:14px;padding:14px 16px;font-size:15px;',
       'font-family:inherit;outline:none;transition:border-color .2s,box-shadow .2s;margin-bottom:12px}',
     '.ogg-input:focus{border-color:#00d4ff;box-shadow:0 0 0 4px rgba(0,212,255,0.12)}',
-    '.ogg-input.code{text-align:center;font-size:30px;letter-spacing:0.45em;font-family:"JetBrains Mono",monospace;padding:12px 8px 12px 20px}',
+    '.ogg-input.code{text-align:center;font-size:25px;letter-spacing:0.3em;font-family:"JetBrains Mono",monospace;padding:12px 8px 12px 16px}',
     '.ogg-btn{width:100%;border:none;border-radius:14px;padding:15px 18px;font-size:14.5px;font-weight:700;',
       'font-family:inherit;cursor:pointer;transition:transform .15s,box-shadow .2s,filter .2s;',
       'display:flex;align-items:center;justify-content:center;gap:6px;-webkit-tap-highlight-color:transparent}',
