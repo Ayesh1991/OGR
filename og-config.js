@@ -17,11 +17,11 @@ window.OG_CONFIG = {
 
   /* Cloudflare Worker URL — no trailing slash.
      e.g. "https://og-revise-broker.YOUR-SUBDOMAIN.workers.dev"   */
-  WORKER_URL: "",
+  WORKER_URL: "https://og-revise-broker.ayeshmantha.workers.dev",
 
   /* Supabase project — Dashboard → Settings → API                */
-  SUPABASE_URL: "",        // e.g. "https://abcdefgh.supabase.co"
-  SUPABASE_ANON_KEY: "",   // the public "anon" key
+  SUPABASE_URL: "https://txlneththpyhyvvgstkc.supabase.co",        // e.g. "https://abcdefgh.supabase.co"
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4bG5ldGh0aHB5aHl2dmdzdGtjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDUxMDQsImV4cCI6MjA5OTYyMTEwNH0.-AC9YTQ6JHPtBOzyFKbRhMyNz98Jf0SyqEMR-dpxHNQ",   // the public "anon" key
 
   /* Shown on the login screen as a hint (enforcement is server-side
      in the Worker via its ALLOWED_EMAIL secret).                  */
