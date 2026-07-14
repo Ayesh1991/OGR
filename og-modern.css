@@ -1,0 +1,111 @@
+/* ═══════════════════════════════════════════════════════════════════
+   OG REVISE — MODERN SKIN  (og-modern.css)
+   Additive polish layer over the existing app. It only ever OVERRIDES
+   presentation — no selector here removes functionality, and every
+   original class keeps working. Safe to delete to return to the old
+   look.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── ambient depth behind everything ─────────────────────────────── */
+#app{position:relative}
+#app::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(55% 40% at 85% -5%, rgba(0,212,255,0.055), transparent 60%),
+    radial-gradient(45% 45% at -10% 110%, rgba(139,92,246,0.06), transparent 60%),
+    radial-gradient(30% 30% at 55% 115%, rgba(0,229,192,0.045), transparent 60%);}
+
+/* ── header: glass + gradient hairline ───────────────────────────── */
+#hd{background:rgba(8,15,30,0.82);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border-bottom:1px solid transparent;
+  border-image:linear-gradient(90deg,transparent,rgba(0,212,255,0.35),rgba(0,229,192,0.3),rgba(139,92,246,0.3),transparent) 1;}
+.logo-icon{background:transparent;border-radius:0;width:38px;height:38px}
+.logo-icon svg{width:38px;height:38px;display:block;filter:drop-shadow(0 0 10px rgba(0,212,255,0.35))}
+.logo-text{letter-spacing:0.03em;
+  background:linear-gradient(92deg,#00d4ff 5%,#00e5c0 60%,#8b5cf6 110%);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.logo-sub{letter-spacing:0.08em;text-transform:uppercase;font-size:9px}
+
+/* search field focus glow */
+.search-wrap input:focus{box-shadow:0 0 0 4px rgba(0,212,255,0.10)}
+
+/* ── sidebar refinement ──────────────────────────────────────────── */
+#sb{background:rgba(8,15,30,0.6);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.tab{transition:all 0.18s cubic-bezier(0.4,0,0.2,1)}
+.tab.on{box-shadow:0 6px 18px rgba(0,212,255,0.16)}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-thumb{background:linear-gradient(#1a2545,#263660);border-radius:6px}
+::-webkit-scrollbar-thumb:hover{background:#2c4070}
+
+/* ── welcome hero ────────────────────────────────────────────────── */
+#welcome{position:relative}
+.w-badge{border:1px solid rgba(0,212,255,0.3);
+  background:linear-gradient(90deg,rgba(0,212,255,0.10),rgba(0,229,192,0.08));
+  box-shadow:0 0 26px rgba(0,212,255,0.10) inset}
+.w-title{letter-spacing:-0.02em}
+.w-title span{background:linear-gradient(92deg,#00d4ff,#00e5c0 55%,#8b5cf6);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.stat{transition:transform 0.22s cubic-bezier(0.34,1.56,0.64,1),box-shadow 0.22s,border-color 0.22s;
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.stat:hover{transform:translateY(-4px);border-color:rgba(0,212,255,0.35);
+  box-shadow:0 14px 34px rgba(0,0,0,0.35),0 0 0 1px rgba(0,212,255,0.12)}
+
+/* signed-in status card (cloud mode only) */
+#w-cloud-card{display:none}
+html.og-cloud #w-cloud-card{display:inline-flex;align-items:center;gap:14px;
+  margin:4px auto 10px;padding:14px 22px;border-radius:18px;text-align:left;
+  background:rgba(13,21,41,0.75);border:1px solid rgba(0,229,192,0.22);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  box-shadow:0 12px 34px rgba(0,0,0,0.35)}
+#w-cloud-card .wcc-ico{width:38px;height:38px;border-radius:12px;flex-shrink:0;
+  background:linear-gradient(135deg,rgba(0,212,255,0.16),rgba(0,229,192,0.14));
+  border:1px solid rgba(0,212,255,0.25);display:flex;align-items:center;justify-content:center;font-size:17px}
+#w-cloud-card .wcc-t1{font-size:13px;font-weight:700;color:var(--t1)}
+#w-cloud-card .wcc-t1 [data-og-email]{color:var(--teal)}
+#w-cloud-card .wcc-t2{font-size:11px;color:var(--t3);margin-top:2px}
+
+/* in cloud mode the old manual-setup instructions are obsolete */
+html.og-cloud .setup-box{display:none}
+
+/* ── content cards ───────────────────────────────────────────────── */
+.icard{transition:transform 0.22s cubic-bezier(0.34,1.56,0.64,1),box-shadow 0.25s,border-color 0.25s}
+.icard:hover{transform:translateY(-4px) scale(1.012);
+  border-color:rgba(0,212,255,0.35);
+  box-shadow:0 18px 44px rgba(0,0,0,0.45),0 0 24px rgba(0,212,255,0.08)}
+.mode-btn,.btn,.vb{transition:all 0.16s cubic-bezier(0.4,0,0.2,1)}
+.mode-btn:active,.btn:active{transform:scale(0.97)}
+
+/* drive pill breathing while connected */
+#drive-status-btn.connected #drive-status-dot{animation:ogc-breathe 2.6s ease-in-out infinite}
+@keyframes ogc-breathe{0%,100%{opacity:1}50%{opacity:0.45}}
+
+/* ── settings panel: cloud account card ──────────────────────────── */
+html.og-cloud #sp-sec-cid,html.og-cloud #sp-sec-fid{display:none}
+.ogc-acct{background:linear-gradient(160deg,rgba(0,212,255,0.06),rgba(139,92,246,0.05));
+  border:1px solid rgba(0,212,255,0.18);border-radius:16px;padding:16px;margin-bottom:14px}
+.ogc-acct-row{display:flex;align-items:center;gap:12px}
+.ogc-avatar{width:40px;height:40px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,#00d4ff,#00e5c0);color:#04121d;
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px}
+.ogc-acct-mail{font-size:13px;font-weight:700;color:var(--t1);word-break:break-all}
+.ogc-acct-sub{font-size:11px;color:var(--t3);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ogc-dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0}
+.ogc-dot.ok{background:var(--green);box-shadow:0 0 8px rgba(16,185,129,0.8)}
+.ogc-dot.no{background:var(--amber)}
+.ogc-acct-btns{display:flex;gap:8px;margin-top:14px}
+.ogc-btn{flex:1;padding:9px 12px;border-radius:10px;font-size:12px;font-weight:700;
+  font-family:var(--font);cursor:pointer;border:1px solid rgba(0,212,255,0.3);
+  background:rgba(0,212,255,0.08);color:var(--cyan);transition:all 0.15s;-webkit-tap-highlight-color:transparent}
+.ogc-btn:hover{background:rgba(0,212,255,0.15)}
+.ogc-btn.danger{border-color:rgba(244,63,94,0.35);background:rgba(244,63,94,0.07);color:var(--rose)}
+.ogc-btn.danger:hover{background:rgba(244,63,94,0.14)}
+.ogc-acct-note{font-size:10.5px;color:var(--t4);line-height:1.6;margin-top:12px}
+
+/* ── entrance animations (JS adds .og-in to welcome children) ────── */
+@media (prefers-reduced-motion: no-preference){
+  .og-pre{opacity:0;transform:translateY(16px)}
+  .og-in{opacity:1;transform:none;transition:opacity 0.6s ease,transform 0.6s cubic-bezier(0.22,1,0.36,1)}
+}
+
+/* ── toast: glass ────────────────────────────────────────────────── */
+#toast{backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}

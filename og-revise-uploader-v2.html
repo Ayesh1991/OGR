@@ -1,0 +1,3211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- OAUTH POPUP HANDLER — must run before app loads -->
+<script>
+(function(){
+  try {
+    if (window.opener && window.location.hash && window.location.hash.includes('access_token')) {
+      var parts = new URLSearchParams(window.location.hash.substring(1));
+      var tok = parts.get('access_token');
+      var exp = parts.get('expires_in') || '3600';
+      if (tok) {
+        window.opener.postMessage({ type: 'og_drive_token', token: tok, expiresIn: exp }, '*');
+        document.write('<html><body style="margin:0;background:#04080f;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#0dd;font-size:16px">✓ Connected — closing…</body></html>');
+        window.close();
+      }
+    }
+  } catch(e) {}
+})();
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#04080f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>OG Revise — Uploader</title>
+<!-- Cloud layer: when og-config.js is filled in, standalone opens are guarded
+     by the private login gate and Drive tokens come from the Worker.
+     Embedded opens (?embed=1) skip the gate — the PWA bridges its session. -->
+<script src="og-config.js"></script>
+<script src="og-cloud.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<style>
+/* Embed mode: when inside the OG Revise PWA overlay, trim redundant chrome. */
+body.og-embedded #og-embed-target-banner{display:none;position:sticky;top:0;z-index:50;
+  background:rgba(245,158,11,0.14);border:1px solid rgba(245,158,11,0.4);color:#f59e0b;
+  font-size:12px;font-weight:700;padding:9px 14px;border-radius:10px;margin:0 auto 10px;max-width:720px;text-align:center}
+:root{
+  --bg:#04080f;--bg1:#080f1e;--bg2:#0d1529;--bg3:#1a2545;--bg4:#263660;
+  --cyan:#00d4ff;--teal:#00e5c0;--violet:#8b5cf6;
+  --amber:#f59e0b;--green:#10b981;--rose:#f43f5e;--blue:#3b82f6;
+  --text1:#f0f4ff;--text2:#a8b8d8;--text3:#6478a0;--text4:#3a4e78;
+  --font:'Segoe UI',system-ui,sans-serif;--mono:monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100vh;background:var(--bg);color:var(--text1);
+  font-family:var(--font);-webkit-font-smoothing:antialiased}
+body{display:flex;flex-direction:column;align-items:center;padding:20px 14px 40px}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:4px}
+
+.header{display:flex;align-items:center;gap:12px;margin-bottom:24px;width:100%;max-width:720px}
+.logo-icon{width:38px;height:38px;background:linear-gradient(135deg,var(--cyan),var(--teal));
+  border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.logo-text{font-size:17px;font-weight:700;
+  background:linear-gradient(90deg,var(--cyan),var(--teal));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.logo-sub{font-size:10px;color:var(--text3);margin-top:-1px}
+.conn-badge{margin-left:auto;padding:5px 12px;border-radius:20px;font-size:11px;
+  display:flex;align-items:center;gap:6px;cursor:pointer;transition:all 0.2s;flex-shrink:0;font-weight:600}
+.conn-badge.disconnected{background:rgba(244,63,94,0.1);border:1px solid rgba(244,63,94,0.3);color:var(--rose);animation:pulse-red 2s ease-in-out infinite}
+.conn-badge.connected{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:var(--green)}
+.status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.status-dot.on{background:var(--green);box-shadow:0 0 5px var(--green)}
+.status-dot.off{background:var(--rose)}
+@keyframes pulse-red{0%,100%{opacity:1}50%{opacity:0.6}}
+
+.card{background:var(--bg1);border:1px solid var(--bg3);border-radius:24px;
+  padding:24px;width:100%;max-width:720px;box-shadow:0 20px 60px rgba(0,0,0,0.7);margin-bottom:16px}
+.card-title{font-size:13px;font-weight:600;color:var(--text2);margin-bottom:16px;
+  display:flex;align-items:center;gap:8px}
+
+/* AUTH CARD */
+.client-row{display:flex;gap:8px;margin-bottom:12px}
+.field-input{flex:1;background:var(--bg2);border:1px solid var(--bg3);border-radius:8px;
+  padding:10px 13px;color:var(--text1);font-family:var(--mono);font-size:12px;
+  outline:none;transition:border-color 0.2s;width:100%}
+.field-input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(0,212,255,0.08)}
+.field-input::placeholder{color:var(--text3)}
+.field-label{font-size:11px;color:var(--text3);margin-bottom:5px;font-weight:500}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;
+  border-radius:8px;border:none;cursor:pointer;font-family:var(--font);
+  font-size:13px;font-weight:600;transition:all 0.2s;white-space:nowrap}
+.btn-primary{background:linear-gradient(135deg,var(--cyan),var(--teal));color:var(--bg)}
+.btn-primary:hover{opacity:0.85;transform:translateY(-1px)}
+.btn-primary:disabled{opacity:0.4;cursor:not-allowed;transform:none}
+.btn-ghost{background:transparent;border:1px solid var(--bg4);color:var(--text2)}
+.btn-ghost:hover{background:var(--bg3);color:var(--text1)}
+.btn-danger{background:rgba(244,63,94,0.1);border:1px solid rgba(244,63,94,0.3);color:var(--rose)}
+.btn-danger:hover{background:rgba(244,63,94,0.2)}
+.hint{font-size:11px;color:var(--text4);line-height:1.6;margin-top:8px}
+.hint a{color:var(--cyan);text-decoration:none}
+
+/* DROP ZONE */
+.drop-zone{border:2px dashed var(--bg3);border-radius:18px;padding:44px 20px;
+  text-align:center;cursor:pointer;transition:all 0.2s;position:relative;background:var(--bg2)}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--cyan);background:rgba(0,212,255,0.03)}
+.drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.drop-icon{font-size:38px;margin-bottom:10px}
+.drop-title{font-size:15px;font-weight:600;color:var(--text1);margin-bottom:5px}
+.drop-sub{font-size:12px;color:var(--text3);line-height:1.6}
+
+/* QUEUE */
+.queue-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.queue-title{font-size:14px;font-weight:600;color:var(--text1)}
+.queue-meta{font-size:11px;color:var(--text3);font-family:var(--mono)}
+.queue-list{display:flex;flex-direction:column;gap:10px;margin-bottom:18px}
+
+.q-item{background:var(--bg2);border:1px solid var(--bg3);border-radius:14px;
+  padding:12px;display:flex;gap:11px;transition:border-color 0.2s}
+.q-item.state-ready{border-color:rgba(0,229,192,0.3)}
+.q-item.state-uploading{border-color:rgba(0,212,255,0.4)}
+.q-item.state-done{border-color:rgba(16,185,129,0.4);background:rgba(16,185,129,0.03)}
+.q-item.state-error{border-color:rgba(244,63,94,0.4)}
+.q-item.state-ocr{border-color:rgba(139,92,246,0.4)}
+.q-item.state-warn{border-color:rgba(245,158,11,0.4)}
+.q-thumb{width:56px;height:56px;border-radius:8px;object-fit:cover;
+  background:var(--bg3);flex-shrink:0;border:1px solid var(--bg4);cursor:pointer}
+.q-body{flex:1;min-width:0}
+.q-name{font-size:12px;font-weight:500;color:var(--text1);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:6px}
+
+/* FOLDER SELECTOR */
+.folder-selector{position:relative;margin-bottom:5px}
+.folder-search{width:100%;background:var(--bg3);border:1px solid var(--bg4);
+  border-radius:8px;padding:7px 11px 7px 30px;color:var(--text1);
+  font-size:12px;outline:none;transition:border-color 0.2s;font-family:var(--font)}
+.folder-search:focus{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(0,212,255,0.1)}
+.folder-search::placeholder{color:var(--text3)}
+.folder-search-icon{position:absolute;left:9px;top:50%;transform:translateY(-50%);
+  font-size:13px;color:var(--text3);pointer-events:none}
+.folder-tag-display{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;
+  border-radius:10px;font-size:11px;font-family:var(--mono);margin-bottom:5px}
+.folder-tag-display.ocr{background:rgba(139,92,246,0.1);color:var(--violet)}
+.folder-tag-display.manual{background:rgba(0,229,192,0.1);color:var(--teal)}
+.folder-tag-display.none{background:rgba(244,63,94,0.1);color:var(--rose)}
+.folder-dropdown{position:absolute;top:100%;left:0;right:0;z-index:100;
+  background:var(--bg2);border:1px solid var(--bg4);border-radius:10px;
+  max-height:180px;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,0.5);margin-top:3px;display:none}
+.folder-dropdown.open{display:block}
+.folder-option{padding:8px 12px;font-size:12px;color:var(--text2);cursor:pointer;
+  transition:background 0.15s;display:flex;align-items:center;gap:8px}
+.folder-option:hover,.folder-option.selected{background:var(--bg3);color:var(--text1)}
+.folder-option mark{background:rgba(0,212,255,0.2);color:var(--cyan);border-radius:2px;padding:0 1px}
+
+.q-status{font-size:11px;color:var(--text3);margin-top:3px}
+.q-progress{height:3px;background:var(--bg3);border-radius:3px;margin-top:6px;overflow:hidden}
+.q-progress-bar{height:100%;border-radius:3px;transition:width 0.3s;
+  background:linear-gradient(90deg,var(--cyan),var(--teal))}
+.q-remove{background:transparent;border:none;color:var(--text4);
+  cursor:pointer;font-size:16px;padding:2px 6px;transition:color 0.2s;flex-shrink:0;align-self:flex-start}
+.q-remove:hover{color:var(--rose)}
+
+.actions-row{display:flex;gap:10px;flex-wrap:wrap}
+.summary{padding:13px 16px;border-radius:12px;font-size:13px;text-align:center;display:none;margin-top:8px}
+.summary.show{display:block}
+.summary.ok{background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);color:var(--green)}
+.summary.warn{background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);color:var(--amber)}
+
+.ocr-bar{padding:9px 13px;border-radius:8px;font-size:12px;margin-bottom:12px;display:none;
+  background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.2);color:var(--violet)}
+.ocr-bar.show{display:flex;align-items:center;gap:7px}
+
+/* Lightbox */
+#lb{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.93);z-index:1000;
+  align-items:center;justify-content:center}
+#lb.on{display:flex}
+#lb img{max-width:95vw;max-height:92vh;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.8)}
+#lb-close{position:fixed;top:16px;right:16px;background:rgba(255,255,255,0.1);border:none;
+  color:#fff;font-size:22px;cursor:pointer;border-radius:50%;width:40px;height:40px}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{display:inline-block;animation:spin 0.8s linear infinite}
+@media(max-width:600px){.card{padding:16px 14px}.drop-zone{padding:32px 14px}}
+
+/* ── PAGE TABS ── */
+.page-tabs{display:flex;gap:4px;background:var(--bg1);border:1px solid var(--bg3);
+  border-radius:14px;padding:4px;margin-bottom:20px;width:100%;max-width:720px}
+.page-tab{flex:1;padding:10px 14px;border-radius:10px;border:none;cursor:pointer;
+  font-family:var(--font);font-size:13px;font-weight:600;color:var(--text3);
+  background:transparent;transition:all 0.18s;-webkit-tap-highlight-color:transparent}
+.page-tab.on{background:var(--bg3);color:var(--text1)}
+.page-tab.on.fc{background:rgba(139,92,246,0.2);color:var(--violet)}
+.page-tab.on.pp{background:rgba(245,158,11,0.2);color:var(--amber)}
+.page-tab.on.os{background:rgba(0,212,255,0.2);color:var(--blue)}
+.page-section{display:none;width:100%;max-width:720px;flex-direction:column;gap:16px}
+.page-section.on{display:flex}
+
+/* ── FLASHCARD MAKER ── */
+.fc-tabs{display:flex;gap:3px;background:var(--bg2);border:1px solid var(--bg3);
+  border-radius:10px;padding:3px;margin-bottom:16px}
+.fc-tab{flex:1;padding:8px 10px;border-radius:7px;border:none;cursor:pointer;
+  font-family:var(--font);font-size:12px;font-weight:600;color:var(--text3);
+  background:transparent;transition:all 0.15s;-webkit-tap-highlight-color:transparent}
+.fc-tab.on{background:var(--bg3);color:var(--violet)}
+.fc-tab-panel{display:none}.fc-tab-panel.on{display:block}
+
+.fc-topic-select{width:100%;background:var(--bg2);border:1px solid var(--bg3);
+  border-radius:10px;padding:10px 13px;color:var(--text1);font-size:13px;
+  font-family:var(--font);outline:none;transition:border-color 0.2s;margin-bottom:12px}
+.fc-topic-select:focus{border-color:var(--violet)}
+.fc-topic-opt{padding:9px 14px;font-size:12px;color:var(--text1);cursor:pointer;
+  border-bottom:1px solid var(--bg3);transition:background 0.1s;user-select:none}
+.fc-topic-opt:hover,.fc-topic-opt:active{background:rgba(139,92,246,0.15);color:var(--violet)}
+.fc-topic-opt mark{background:rgba(139,92,246,0.3);color:var(--violet);
+  border-radius:2px;padding:0 1px;font-style:normal}
+
+.fc-drop{border:2px dashed var(--bg3);border-radius:14px;padding:32px 20px;
+  text-align:center;cursor:pointer;transition:all 0.2s;position:relative;background:var(--bg2);
+  margin-bottom:12px}
+.fc-drop:hover,.fc-drop.over{border-color:var(--violet);background:rgba(139,92,246,0.04)}
+.fc-drop input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.fc-drop-ready{border-color:var(--green);background:rgba(16,185,129,0.04)}
+
+.fc-drive-list{display:flex;flex-direction:column;gap:8px;max-height:260px;
+  overflow-y:auto;-webkit-overflow-scrolling:touch}
+.fc-drive-item{display:flex;align-items:center;gap:10px;padding:10px 13px;
+  background:var(--bg2);border:1px solid var(--bg3);border-radius:10px;
+  cursor:pointer;transition:all 0.15s;-webkit-tap-highlight-color:transparent}
+.fc-drive-item:hover,.fc-drive-item.sel{border-color:var(--violet);background:rgba(139,92,246,0.06)}
+.fc-drive-item.sel{border-color:var(--green);background:rgba(16,185,129,0.06)}
+.fc-drive-name{flex:1;font-size:12px;color:var(--text1);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.fc-drive-meta{font-size:10px;color:var(--text3);font-family:var(--mono);white-space:nowrap}
+
+.fc-key-row{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+.fc-key-input{flex:1;background:var(--bg2);border:1px solid var(--bg3);border-radius:8px;
+  padding:9px 12px;color:var(--text1);font-family:var(--mono);font-size:11px;
+  outline:none;transition:border-color 0.2s}
+.fc-key-input:focus{border-color:var(--violet)}
+.fc-key-toggle{background:var(--bg3);border:1px solid var(--bg4);border-radius:6px;
+  color:var(--text2);font-size:13px;padding:8px 10px;cursor:pointer;flex-shrink:0}
+
+.fc-gen-btn{width:100%;padding:14px;background:linear-gradient(135deg,var(--violet),#6366f1);
+  color:#fff;border:none;border-radius:12px;font-family:var(--font);font-size:15px;
+  font-weight:700;cursor:pointer;transition:opacity 0.2s;letter-spacing:0.3px}
+.fc-gen-btn:hover{opacity:0.88}
+.fc-gen-btn:disabled{opacity:0.4;cursor:not-allowed}
+
+.fc-steps{display:flex;flex-direction:column;gap:6px;padding:12px 14px;
+  background:var(--bg2);border:1px solid var(--bg3);border-radius:10px;margin-bottom:12px;
+  font-size:12px}
+.fc-step{display:flex;align-items:center;gap:8px;color:var(--text3)}
+.fc-step.active{color:var(--cyan)}
+.fc-step.done{color:var(--green)}
+.fc-step.error{color:var(--rose)}
+.fc-step-icon{width:20px;text-align:center;font-size:14px;flex-shrink:0}
+
+.fc-cards-list{display:flex;flex-direction:column;gap:10px;max-height:420px;
+  overflow-y:auto;-webkit-overflow-scrolling:touch}
+/* Card count buttons */
+.fc-count-btn{flex:1;padding:10px 8px;background:var(--bg2);border:2px solid var(--bg3);
+  border-radius:10px;color:var(--text2);font-size:13px;font-weight:700;cursor:pointer;
+  font-family:var(--font);text-align:center;transition:all 0.15s;line-height:1.4;
+  -webkit-tap-highlight-color:transparent}
+.fc-count-btn.on{border-color:var(--violet);background:rgba(139,92,246,0.12);color:var(--violet)}
+.fc-card-item{background:var(--bg2);border:1px solid var(--bg3);border-radius:12px;
+  padding:13px 15px}
+.fc-card-q{font-size:13px;font-weight:600;color:var(--text1);margin-bottom:6px;line-height:1.5}
+.fc-card-a{font-size:12px;color:var(--text2);line-height:1.6}
+.fc-card-badge{font-size:10px;font-family:var(--mono);color:var(--amber);margin-bottom:4px}
+</style>
+</head>
+<body>
+<!-- Drive reconnect popup -->
+<div id="upl-reconnect-popup" style="display:none;position:fixed;inset:0;z-index:999;
+  background:rgba(0,0,0,0.75);backdrop-filter:blur(8px);align-items:center;justify-content:center">
+  <div style="background:#1e2130;border:1px solid rgba(255,255,255,0.1);border-radius:20px;
+    padding:32px 28px;max-width:340px;width:90%;text-align:center">
+    <div style="font-size:44px;margin-bottom:12px">🔌</div>
+    <div style="font-size:17px;font-weight:700;color:#f1f5f9;margin-bottom:8px">Drive Disconnected</div>
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:24px;line-height:1.6">
+      Your session expired. Reconnect to upload infographics and flashcards to Drive.</div>
+    <button onclick="document.getElementById('upl-reconnect-popup').classList.remove('on');launchDriveOAuthPopup(STATE.clientId||localStorage.getItem('og_cid')||'')"
+      style="width:100%;padding:12px;background:linear-gradient(135deg,#7c3aed,#6366f1);
+      border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:8px">
+      🔗 Reconnect to Drive</button>
+    <button onclick="document.getElementById('upl-reconnect-popup').classList.remove('on')"
+      style="width:100%;padding:10px;background:transparent;border:1px solid rgba(255,255,255,0.1);
+      border-radius:10px;color:#94a3b8;font-size:12px;cursor:pointer">
+      Continue without Drive</button>
+  </div>
+</div>
+<style>#upl-reconnect-popup.on{display:flex}</style>
+
+<div class="header">
+  <div class="logo-icon">🩺</div>
+  <div>
+    <div class="logo-text">OG Revise — Tools</div>
+    <div class="logo-sub">Uploader · Flashcard Maker</div>
+  </div>
+  <div class="conn-badge disconnected" id="conn-badge" onclick="toggleAuth()">
+    <div class="status-dot off" id="conn-dot"></div>
+    <span id="conn-label">Connect Drive</span>
+  </div>
+</div>
+
+<!-- PAGE TABS -->
+<div class="page-tabs">
+  <button class="page-tab on" id="tab-upload" onclick="switchPage('upload')">☁️ Uploader</button>
+  <button class="page-tab fc"  id="tab-fc"     onclick="switchPage('fc')">🃏 Flashcard Maker</button>
+  <button class="page-tab pp"  id="tab-pp"     onclick="switchPage('pp')">📝 Exam Papers</button>
+  <button class="page-tab os"  id="tab-os"     onclick="switchPage('os')">🎙️ OSCE</button>
+  <button class="page-tab es"  id="tab-es"     onclick="switchPage('es')">📝 Essay</button>
+</div>
+<div id="og-embed-target-banner" style="display:none"></div>
+
+<!-- ═══════ UPLOADER SECTION ═══════ -->
+<div class="page-section on" id="section-upload">
+
+<!-- AUTH CARD -->
+<div class="card" id="auth-card">
+  <div class="card-title">🔑 Google Drive Connection</div>
+  <div class="field-label">OAuth2 Client ID</div>
+  <div class="client-row">
+    <input class="field-input" id="cfg-cid" placeholder="xxxxxxxxx.apps.googleusercontent.com">
+    <button class="btn btn-primary" onclick="connectDrive()">Connect</button>
+  </div>
+  <div class="field-label">Root Folder ID</div>
+  <input class="field-input" id="cfg-fid" placeholder="1BxiMVs0XRA5nFMdKvBdBZjg..." style="margin-bottom:8px">
+  <div class="hint">
+    Get your Client ID from <a href="https://console.cloud.google.com" target="_blank">Google Cloud Console</a>.
+    Get Folder ID from the Drive URL when your OG-Revise-Infographics folder is open.<br>
+    This page must be hosted (GitHub Pages etc) — not opened as a local file.
+  </div>
+</div>
+
+<!-- DROP ZONE CARD -->
+<div class="card">
+  <div class="drop-zone" id="drop-zone">
+    <input type="file" id="file-input" accept="image/*,.docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple onchange="handleFiles(this.files)">
+    <div class="drop-icon">📂</div>
+    <div class="drop-title">Drop infographics here or tap to select</div>
+    <div class="drop-sub">
+      Images (PNG, JPG), Word documents (DOCX), PDFs<br>
+      Images: OCR reads OGRDRIVE label · DOCX/PDF: QR code scanned from first page
+    </div>
+  </div>
+</div>
+
+<!-- QUEUE CARD -->
+<div class="card" id="queue-card" style="display:none">
+  <div class="ocr-bar" id="ocr-bar"></div>
+  <div class="queue-header">
+    <div class="queue-title">Upload Queue</div>
+    <div class="queue-meta" id="q-meta"></div>
+  </div>
+  <div class="queue-list" id="queue-list"></div>
+  <div class="actions-row">
+    <button class="btn btn-primary" id="upload-btn" onclick="uploadAll()">☁ Upload All to Drive</button>
+    <button class="btn btn-ghost" onclick="document.getElementById('extra-fi').click()">+ Add More</button>
+    <button class="btn btn-danger" onclick="clearAll()">✕ Clear</button>
+  </div>
+  <div class="summary" id="summary"></div>
+</div>
+
+<input type="file" id="extra-fi" accept="image/*,.docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple style="display:none" onchange="handleFiles(this.files)">
+
+</div><!-- end section-upload -->
+
+<!-- ═══════ FLASHCARD MAKER SECTION ═══════ -->
+<div class="page-section" id="section-fc">
+
+  <div class="card">
+    <div class="card-title">🃏 Flashcard Generator</div>
+
+    <!-- Searchable topic selector -->
+    <div class="field-label">Topic (Drive folder)</div>
+    <div style="position:relative;margin-bottom:4px">
+      <input class="fc-topic-select" id="fc-topic-search"
+        placeholder="Type to search — e.g. 'section' shows Caesarean section…"
+        autocomplete="off"
+        oninput="fcTopicSearch(this.value)"
+        onfocus="fcTopicSearch(this.value)"
+        onblur="setTimeout(()=>{const d=document.getElementById('fc-topic-dd');if(d)d.style.display='none'},200)">
+      <div id="fc-topic-dd" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;
+        background:var(--bg2);border:1px solid var(--violet);border-radius:0 0 10px 10px;
+        max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5)"></div>
+    </div>
+    <div id="fc-topic-conf" style="font-size:10px;color:var(--violet);font-family:var(--mono);
+      min-height:14px;margin-bottom:10px"></div>
+
+    <!-- Deck name -->
+    <div class="field-label">Deck Name <span style="color:var(--text3);font-weight:400;font-size:10px">(subtopic — e.g. HSV, CMV, Chickenpox)</span></div>
+    <input class="fc-topic-select" id="fc-deck-name"
+      placeholder="e.g. HSV  or  CMV  or  Chickenpox"
+      style="margin-bottom:4px" oninput="fcUpdateDeckPreview()">
+    <div id="fc-deck-preview" style="font-size:11px;color:var(--violet);font-family:var(--mono);
+      margin-bottom:12px;min-height:16px"></div>
+
+    <!-- Source tabs -->
+    <div class="fc-tabs">
+      <button class="fc-tab on" id="fct-drive" onclick="fcSwitchTab('drive')">📁 From Drive</button>
+      <button class="fc-tab"    id="fct-local" onclick="fcSwitchTab('local')">📂 Local File</button>
+      <button class="fc-tab"    id="fct-json"  onclick="fcSwitchTab('json')">📄 JSON File</button>
+    </div>
+
+    <!-- Drive file picker -->
+    <div class="fc-tab-panel on" id="fcp-drive">
+      <button class="btn btn-ghost" style="width:100%;margin-bottom:10px;font-size:12px"
+        onclick="fcLoadDriveFiles()">🔄 Load documents from this topic's Drive folder</button>
+      <div class="fc-drive-list" id="fc-drive-list">
+        <div style="font-size:12px;color:var(--text3);text-align:center;padding:20px">
+          Select a topic above, then tap Load to browse files
+        </div>
+      </div>
+    </div>
+
+    <!-- Local file drop -->
+    <div class="fc-tab-panel" id="fcp-local">
+      <div class="fc-drop" id="fc-drop">
+        <input type="file" id="fc-file-input"
+          accept=".docx,.pdf,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+          onchange="fcHandleLocalFile(this.files[0])">
+        <div style="font-size:32px;margin-bottom:8px">📂</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text1);margin-bottom:4px">Drop or tap to select</div>
+        <div style="font-size:11px;color:var(--text3)">DOCX · PDF · TXT</div>
+      </div>
+      <div id="fc-local-status" style="font-size:12px;color:var(--text3);text-align:center;margin-top:4px"></div>
+    </div>
+
+    <!-- JSON file from Claude Flashcard project -->
+    <div class="fc-tab-panel" id="fcp-json">
+      <div class="fc-drop" id="fc-json-drop" style="border-color:rgba(139,92,246,0.5)">
+        <input type="file" id="fc-json-input" accept=".json,application/json"
+          onchange="fcHandleJsonFile(this.files[0])">
+        <div style="font-size:32px;margin-bottom:8px">📄</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text1);margin-bottom:4px">Drop or tap to upload JSON</div>
+        <div style="font-size:11px;color:var(--text3)">From Claude Flashcard project</div>
+      </div>
+      <div id="fc-json-status" style="font-size:12px;text-align:center;margin-top:6px"></div>
+      <div style="margin-top:10px;padding:10px 12px;background:var(--bg2);border-radius:8px;
+        border:1px solid var(--bg3);font-size:11px;color:var(--text3);line-height:1.6">
+        💡 <strong style="color:var(--violet)">How to use:</strong><br>
+        1. Open Claude → <em>Flashcard</em> project → upload summary doc<br>
+        2. Copy the JSON reply → save as <code>.json</code> file<br>
+        3. Drop it here → it uploads to Drive instantly — no AI cost
+      </div>
+    </div>
+
+    <!-- Claude API key -->
+    <div class="field-label" style="margin-top:14px">Anthropic API Key</div>
+    <div class="fc-key-row">
+      <input class="fc-key-input" id="fc-api-key" type="password"
+        placeholder="sk-ant-api03-…" oninput="fcSaveKey(this.value)">
+      <button class="fc-key-toggle" onclick="fcToggleKey()">👁</button>
+    </div>
+    <div class="hint" style="margin-bottom:10px">
+      Get your key from <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>
+      → API Keys → Create Key. Set a <strong>$10/month spend limit</strong> in Billing settings.
+    </div>
+
+    <!-- Model selector -->
+    <div class="field-label">AI Model</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+
+      <!-- Haiku - DEFAULT -->
+      <label style="display:flex;align-items:center;gap:8px;padding:10px 12px;
+        background:var(--bg2);border:2px solid var(--violet);border-radius:10px;cursor:pointer;
+        font-size:12px;color:var(--text1);transition:all 0.15s" id="model-haiku-label">
+        <input type="radio" name="fc-model" id="model-haiku" value="haiku"
+          checked onchange="fcModelChange()" style="accent-color:var(--violet)">
+        <div>
+          <div style="font-weight:700">Haiku 4.5 <span style="color:var(--green);font-size:9px">DEFAULT</span></div>
+          <div style="color:var(--text3);font-size:10px">~$0.04/doc · Paid · Reliable</div>
+        </div>
+      </label>
+
+      <!-- Groq/Llama - FREE -->
+      <label style="display:flex;align-items:center;gap:8px;padding:10px 12px;
+        background:var(--bg2);border:2px solid var(--bg3);border-radius:10px;cursor:pointer;
+        font-size:12px;color:var(--text1);transition:all 0.15s" id="model-groq-label">
+        <input type="radio" name="fc-model" id="model-groq" value="groq"
+          onchange="fcModelChange()" style="accent-color:var(--violet)">
+        <div>
+          <div style="font-weight:700">Llama 3.3 <span style="color:var(--green);font-size:9px">FREE</span></div>
+          <div style="color:var(--text3);font-size:10px">Groq · 14,400 req/day · Fast</div>
+        </div>
+      </label>
+
+      <!-- Gemini - FREE -->
+      <label style="display:flex;align-items:center;gap:8px;padding:10px 12px;
+        background:var(--bg2);border:2px solid var(--bg3);border-radius:10px;cursor:pointer;
+        font-size:12px;color:var(--text1);transition:all 0.15s" id="model-gemini-label">
+        <input type="radio" name="fc-model" id="model-gemini" value="gemini"
+          onchange="fcModelChange()" style="accent-color:var(--violet)">
+        <div>
+          <div style="font-weight:700">Gemini Flash <span style="color:var(--cyan);font-size:9px">FREE</span></div>
+          <div style="color:var(--text3);font-size:10px">1,500 req/day · Auto-fallback</div>
+        </div>
+      </label>
+
+      <!-- Sonnet - PREMIUM -->
+      <label style="display:flex;align-items:center;gap:8px;padding:10px 12px;
+        background:var(--bg2);border:2px solid var(--bg3);border-radius:10px;cursor:pointer;
+        font-size:12px;color:var(--text1);transition:all 0.15s" id="model-sonnet-label">
+        <input type="radio" name="fc-model" id="model-sonnet" value="sonnet"
+          onchange="fcModelChange()" style="accent-color:var(--violet)">
+        <div>
+          <div style="font-weight:700">Sonnet 4.6 <span style="color:var(--amber);font-size:9px">DEEP</span></div>
+          <div style="color:var(--text3);font-size:10px">~$0.25/doc · Richest reasoning</div>
+        </div>
+      </label>
+    </div>
+
+    <!-- Groq key row -->
+    <div id="groq-key-row" style="display:none;margin-bottom:10px">
+      <div class="field-label" style="margin-top:8px">Groq API Key <span style="color:var(--green);font-size:10px">(free at console.groq.com)</span></div>
+      <div class="fc-key-row">
+        <input class="fc-key-input" id="fc-groq-key" type="password"
+          placeholder="gsk_…" oninput="fcSaveGroqKey(this.value)">
+        <button class="fc-key-toggle" onclick="fcToggleGroqKey()">👁</button>
+      </div>
+      <div style="font-size:10px;color:var(--text3);margin-top:4px">
+        Free: 14,400 req/day · 30 req/min · Auto-falls back to Haiku if it fails
+      </div>
+    </div>
+
+    <!-- Gemini key row -->
+    <div id="gemini-key-row" style="display:none;margin-bottom:10px">
+      <div class="field-label" style="margin-top:8px">Gemini API Key <span style="color:var(--cyan);font-size:10px">(free at aistudio.google.com)</span></div>
+      <div class="fc-key-row">
+        <input class="fc-key-input" id="fc-gemini-key" type="password"
+          placeholder="AIza…" oninput="fcSaveGeminiKey(this.value)">
+        <button class="fc-key-toggle" onclick="fcToggleGeminiKey()">👁</button>
+      </div>
+      <div style="font-size:10px;color:var(--text3);margin-top:4px">
+        Free: 1,500 req/day · Error 400 = wrong/restricted key · Auto-falls back to Haiku
+      </div>
+    </div>
+
+    <!-- Card count selector -->
+    <div class="field-label" style="margin-top:6px">Number of Cards</div>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="fc-count-btn" id="fc-count-10" onclick="fcSetCount(10)">10 cards<br><span style="font-size:9px;opacity:0.7">Quick revision</span></button>
+      <button class="fc-count-btn on" id="fc-count-15" onclick="fcSetCount(15)">15 cards<br><span style="font-size:9px;opacity:0.7">Default</span></button>
+      <button class="fc-count-btn" id="fc-count-20" onclick="fcSetCount(20)">20 cards<br><span style="font-size:9px;opacity:0.7">Deep cover</span></button>
+    </div>
+
+    <!-- Progress steps (hidden until running) -->
+    <div id="fc-steps" style="display:none">
+      <div class="fc-steps">
+        <div class="fc-step" id="fcs-read"><div class="fc-step-icon">📄</div><span>Reading document</span></div>
+        <div class="fc-step" id="fcs-gen"><div class="fc-step-icon">🧠</div><span>Generating flashcards</span></div>
+        <div class="fc-step" id="fcs-up"><div class="fc-step-icon">☁️</div><span>Uploading to Drive</span></div>
+        <div class="fc-step" id="fcs-done"><div class="fc-step-icon">✅</div><span>Complete</span></div>
+      </div>
+    </div>
+
+    <!-- Countdown overlay shown before Gemini→Haiku auto-switch -->
+    <div id="fc-countdown-box" style="display:none;margin-top:10px;
+      background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.4);
+      border-radius:10px;padding:14px 16px;text-align:center">
+      <div style="font-size:12px;color:var(--amber);font-weight:600;margin-bottom:6px">
+        ⚠ <span id="fc-countdown-title">Free model failed</span> — switching to Haiku in <span id="fc-countdown-n">5</span>s
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px" id="fc-countdown-reason"></div>
+      <button id="fc-countdown-stop" style="background:rgba(244,63,94,0.15);border:1px solid rgba(244,63,94,0.4);
+        color:var(--rose);border-radius:8px;padding:7px 20px;font-size:12px;font-weight:700;
+        cursor:pointer;font-family:var(--font);-webkit-tap-highlight-color:transparent">
+        ✋ Stop — don't switch to Haiku
+      </button>
+    </div>
+
+    <!-- Generate button -->
+    <button class="fc-gen-btn" id="fc-gen-btn" onclick="fcGenerate()">⚡ Generate &amp; Upload to Drive</button>
+
+    <!-- Error log — stays visible, copyable, accumulates all errors -->
+    <div id="fc-error-log" style="display:none;margin-top:12px;background:rgba(244,63,94,0.08);
+      border:1px solid rgba(244,63,94,0.3);border-radius:10px;padding:12px 14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;color:var(--rose)">⚠ Error Log</div>
+        <div style="display:flex;gap:6px">
+          <button onclick="fcCopyAllErrors()" style="background:rgba(244,63,94,0.15);border:1px solid rgba(244,63,94,0.4);
+            color:var(--rose);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-family:var(--font)">
+            📋 Copy All Errors
+          </button>
+          <button onclick="fcClearErrors()" style="background:var(--bg3);border:1px solid var(--bg4);
+            color:var(--text3);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-family:var(--font)">
+            ✕ Clear
+          </button>
+        </div>
+      </div>
+      <div id="fc-error-list" style="font-size:11px;color:var(--rose);font-family:var(--mono);
+        line-height:1.7;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto"></div>
+      <div style="font-size:10px;color:var(--text3);margin-top:8px">
+        Tap <strong>📋 Copy All Errors</strong> → paste in Claude chat to get advice
+      </div>
+    </div>
+  </div>
+
+  <!-- Generated cards preview -->
+  <div class="card" id="fc-result-card" style="display:none">
+    <div class="card-title" id="fc-result-title">Generated Flashcards</div>
+    <div class="fc-cards-list" id="fc-cards-list"></div>
+  </div>
+
+</div><!-- end section-fc -->
+
+<!-- ═══════ EXAM PAPERS (SBA/EMQ) SECTION ═══════ -->
+<div class="page-section" id="section-pp">
+
+  <div class="card">
+    <div class="card-title">📝 Exam Paper Uploader <span style="font-size:11px;color:var(--text3);font-weight:400">SBA &amp; EMQ</span></div>
+
+    <!-- Category -->
+    <div class="field-label">Category</div>
+    <select id="pp-category" onchange="ppCatChange()"
+      style="width:100%;background:var(--bg2);border:1px solid var(--bg3);border-radius:10px;padding:11px 14px;color:var(--text1);font-size:13px;font-family:inherit;margin-bottom:12px;cursor:pointer;outline:none">
+      <option value="">— select category —</option>
+      <option value="Obstetrics">🤰 Obstetrics</option>
+      <option value="Gynaecology">🩺 Gynaecology</option>
+      <option value="TOG">📰 TOG</option>
+      <option value="Statistics">📊 Statistics</option>
+      <option value="Paper books">📚 Paper books</option>
+    </select>
+
+    <!-- Subcategory -->
+    <div class="field-label">Section <span id="pp-sub-hint" style="color:var(--text3);font-weight:400;font-size:10px"></span></div>
+    <div style="position:relative;margin-bottom:12px">
+      <select id="pp-subcategory" onchange="ppSubSelectChange()"
+        style="width:100%;background:var(--bg2);border:1px solid var(--bg3);border-radius:10px;padding:11px 14px;color:var(--text1);font-size:13px;font-family:inherit;cursor:pointer;outline:none;display:block">
+        <option value="">— select category first —</option>
+      </select>
+      <input id="pp-subcategory-free" placeholder="Type a section name (optional)…"
+        style="width:100%;background:var(--bg2);border:1px solid var(--bg3);border-radius:10px;padding:11px 14px;color:var(--text1);font-size:13px;font-family:inherit;outline:none;display:none"
+        oninput="ppSubFreeChange()">
+    </div>
+
+    <!-- Topic -->
+    <div class="field-label">Paper Topic <span style="color:var(--text3);font-weight:400;font-size:10px">(Drive folder — created if new)</span></div>
+    <div style="position:relative;margin-bottom:4px">
+      <input class="fc-topic-select" id="pp-topic-search"
+        placeholder="Type the topic — e.g. Postpartum haemorrhage…"
+        autocomplete="off"
+        oninput="ppTopicSearch(this.value)"
+        onfocus="ppTopicSearch(this.value)"
+        onblur="setTimeout(()=>{const d=document.getElementById('pp-topic-dd');if(d)d.style.display='none'},200)">
+      <div id="pp-topic-dd" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;
+        background:var(--bg2);border:1px solid var(--amber);border-radius:0 0 10px 10px;
+        max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5)"></div>
+    </div>
+    <div id="pp-topic-conf" style="font-size:10px;color:var(--amber);font-family:var(--mono);
+      min-height:14px;margin-bottom:12px"></div>
+
+    <!-- Save-as-separate option -->
+    <div style="background:var(--bg2);border:1px solid var(--bg3);border-radius:10px;padding:10px 12px;margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:9px;cursor:pointer;-webkit-tap-highlight-color:transparent">
+        <input type="checkbox" id="pp-separate" onchange="ppSeparateToggle()" style="width:18px;height:18px;accent-color:#f59e0b;flex-shrink:0">
+        <span style="font-size:12.5px;color:var(--text1);font-weight:600">Save as a separate paper</span>
+      </label>
+      <div style="font-size:10.5px;color:var(--text3);margin-top:5px;line-height:1.5">
+        Off → re-uploading the same topic <strong>merges</strong> into the existing paper.<br>
+        On → keeps this as a <strong>distinct paper</strong> in the same topic folder (e.g. two different Ovarian cancer papers).
+      </div>
+      <div id="pp-sep-name-wrap" style="display:none;margin-top:10px">
+        <div class="field-label" style="margin-bottom:4px">Display name <span style="color:var(--text3);font-weight:400;font-size:10px">(shown in the PWA)</span></div>
+        <input class="fc-topic-select" id="pp-sep-name" autocomplete="off"
+          placeholder="e.g. Ovarian cancer — Paper 2"
+          oninput="ppSepNamePreview()" style="width:100%">
+        <div id="pp-sep-name-conf" style="font-size:10px;color:var(--amber);font-family:var(--mono);min-height:13px;margin-top:4px"></div>
+      </div>
+    </div>
+
+    <!-- JSON drop -->
+    <div class="fc-drop" id="pp-json-drop" style="border-color:rgba(245,158,11,0.5)">
+      <input type="file" id="pp-json-input" accept=".json,application/json"
+        onchange="ppHandleJsonFile(this.files[0])">
+      <div style="font-size:32px;margin-bottom:8px">📝</div>
+      <div style="font-size:14px;font-weight:600;color:var(--text1);margin-bottom:4px">Drop or tap to upload paper JSON</div>
+      <div style="font-size:11px;color:var(--text3)">From the Claude SBA/EMQ Generator project</div>
+    </div>
+    <div id="pp-json-status" style="font-size:12px;text-align:center;margin-top:6px;min-height:16px"></div>
+
+    <!-- Parsed preview -->
+    <div id="pp-preview" style="display:none;margin-top:12px"></div>
+
+    <!-- Upload button -->
+    <button class="btn btn-p" id="pp-upload-btn" style="width:100%;margin-top:14px;display:none;
+      background:linear-gradient(135deg,#f59e0b,#d97706);border:none"
+      onclick="ppUpload()">☁️ Upload paper to Drive</button>
+
+    <div id="pp-steps" style="margin-top:12px"></div>
+
+    <!-- Help -->
+    <div style="margin-top:14px;padding:10px 12px;background:var(--bg2);border-radius:8px;
+      border:1px solid var(--bg3);font-size:11px;color:var(--text3);line-height:1.6">
+      💡 <strong style="color:var(--amber)">How to use:</strong><br>
+      1. Open Claude → <em>SBA/EMQ Generator</em> project → upload a guideline PDF/DOCX<br>
+      2. It returns a <strong>paper JSON</strong> — save it as a <code>.json</code> file<br>
+      3. Pick a <strong>category</strong> (and section), type the topic, drop the JSON, tap Upload<br>
+      4. It lands in <strong>OG-Revise-Papers / Category / Section</strong> as <code>papers__&lt;Topic&gt;.json</code> and appears under that category in the PWA's 🧪 Papers section<br>
+      <span style="color:var(--text3)">Category &amp; section auto-fill if present in the JSON. Re-uploading the same topic merges questions, de-duplicates, and moves it if you change its category.</span>
+    </div>
+  </div>
+
+</div><!-- end section-pp -->
+
+<!-- ═══════ OSCE STATIONS SECTION ═══════ -->
+<div class="page-section" id="section-os">
+
+  <div class="card">
+    <div class="card-title">🎙️ OSCE Station Uploader <span style="font-size:11px;color:var(--text3);font-weight:400">voice mock stations</span></div>
+
+    <!-- Category -->
+    <div class="field-label">Category</div>
+    <select id="os-category" onchange="osCatChange()"
+      style="width:100%;background:var(--bg2);border:1px solid var(--bg3);border-radius:10px;padding:11px 14px;color:var(--text1);font-size:13px;font-family:inherit;margin-bottom:12px;cursor:pointer;outline:none">
+      <option value="">— select category —</option>
+      <option value="Obstetrics">🤰 Obstetrics</option>
+      <option value="Gynaecology">🩺 Gynaecology</option>
+      <option value="TOG">📰 TOG</option>
+      <option value="Statistics">📊 Statistics</option>
+      <option value="Paper books">📚 Paper books</option>
+    </select>
+
+    <!-- Subcategory -->
+    <div class="field-label">Section <span id="os-sub-hint" style="color:var(--text3);font-weight:400;font-size:10px"></span></div>
+    <div style="position:relative;margin-bottom:12px">
+      <select id="os-subcategory" onchange="osSubSelectChange()"
+        style="width:100%;background:var(--bg2);border:1px solid var(--bg3);border-radius:10px;padding:11px 14px;color:var(--text1);font-size:13px;font-family:inherit;cursor:pointer;outline:none;display:block">
+        <option value="">— select category first —</option>
+      </select>
+      <input id="os-subcategory-free" placeholder="Type a section name (optional)…"
+        style="width:100%;background:var(--bg2);border:1px solid var(--bg3);border-radius:10px;padding:11px 14px;color:var(--text1);font-size:13px;font-family:inherit;outline:none;display:none"
+        oninput="osSubFreeChange()">
+    </div>
+
+    <!-- Topic -->
+    <div class="field-label">Station Topic <span style="color:var(--text3);font-weight:400;font-size:10px">(Drive folder — created if new)</span></div>
+    <div style="position:relative;margin-bottom:4px">
+      <input class="fc-topic-select" id="os-topic-search"
+        placeholder="Type the topic — e.g. Epilepsy in pregnancy…"
+        autocomplete="off"
+        oninput="osTopicSearch(this.value)"
+        onfocus="osTopicSearch(this.value)"
+        onblur="setTimeout(()=>{const d=document.getElementById('os-topic-dd');if(d)d.style.display='none'},200)">
+      <div id="os-topic-dd" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;
+        background:var(--bg2);border:1px solid var(--blue);border-radius:0 0 10px 10px;
+        max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5)"></div>
+    </div>
+    <div id="os-topic-conf" style="font-size:10px;color:var(--blue);font-family:var(--mono);
+      min-height:14px;margin-bottom:12px"></div>
+
+    <!-- JSON drop -->
+    <div class="fc-drop" id="os-json-drop" style="border-color:rgba(0,212,255,0.5)">
+      <input type="file" id="os-json-input" accept=".json,application/json"
+        onchange="osHandleJsonFile(this.files[0])">
+      <div style="font-size:32px;margin-bottom:8px">🎙️</div>
+      <div style="font-size:14px;font-weight:600;color:var(--text1);margin-bottom:4px">Drop or tap to upload station JSON</div>
+      <div style="font-size:11px;color:var(--text3)">From the Claude OSCE Developer project</div>
+    </div>
+    <div id="os-json-status" style="font-size:12px;text-align:center;margin-top:6px;min-height:16px"></div>
+
+    <div id="os-preview" style="display:none;margin-top:12px"></div>
+
+    <button class="btn btn-p" id="os-upload-btn" style="width:100%;margin-top:14px;display:none;
+      background:linear-gradient(135deg,#00d4ff,#0093c4);border:none;color:#04080f"
+      onclick="osUpload()">☁️ Upload station to Drive</button>
+
+    <div id="os-steps" style="margin-top:12px"></div>
+
+    <div style="margin-top:14px;padding:10px 12px;background:var(--bg2);border-radius:8px;
+      border:1px solid var(--bg3);font-size:11px;color:var(--text3);line-height:1.6">
+      💡 <strong style="color:var(--blue)">How to use:</strong><br>
+      1. Open Claude → <em>OSCE Developer</em> project → upload a guideline/article<br>
+      2. It returns a <strong>station JSON</strong> — save it as a <code>.json</code> file<br>
+      3. Pick a <strong>category</strong> (and section), type the topic, drop the JSON, tap Upload<br>
+      4. It lands in <strong>OG-Revise-OSCE / Category / Section</strong> as <code>osce__&lt;Topic&gt;.json</code> and appears in the PWA's 🎙️ OSCE Simulator<br>
+      <span style="color:var(--text3)">Category &amp; section auto-fill if present in the JSON. Re-uploading the same topic overwrites it (keeping attempt history) and moves it if you change its category.</span>
+    </div>
+  </div>
+
+</div><!-- end section-os -->
+
+<!-- ═══════ ESSAY SECTION ═══════ -->
+<div class="page-section" id="section-es">
+
+  <div class="card">
+    <div class="card-title">📝 Essay Uploader <span style="font-size:11px;color:var(--text3);font-weight:400">marked long-answer essays</span></div>
+
+    <!-- JSON drop -->
+    <div class="fc-drop" id="es-json-drop" style="border-color:rgba(167,139,250,0.5)">
+      <input type="file" id="es-json-input" accept=".json,application/json"
+        onchange="esHandleJsonFile(this.files[0])">
+      <div style="font-size:32px;margin-bottom:8px">📝</div>
+      <div style="font-size:14px;font-weight:600;color:var(--text1);margin-bottom:4px">Drop or tap to upload essay JSON</div>
+      <div style="font-size:11px;color:var(--text3)">From the Claude Essay Marker artifact</div>
+    </div>
+    <div id="es-json-status" style="font-size:12px;text-align:center;margin-top:6px;min-height:16px"></div>
+
+    <div id="es-preview" style="display:none;margin-top:12px"></div>
+
+    <button class="btn btn-p" id="es-upload-btn" style="width:100%;margin-top:14px;display:none;
+      background:linear-gradient(135deg,#a78bfa,#7c5cff);border:none;color:#fff"
+      onclick="esUpload()">☁️ Upload essay to Drive</button>
+
+    <div id="es-steps" style="margin-top:12px"></div>
+
+    <div style="margin-top:14px;padding:10px 12px;background:var(--bg2);border-radius:8px;
+      border:1px solid var(--bg3);font-size:11px;color:var(--text3);line-height:1.6">
+      💡 <strong style="color:#a78bfa">How to use:</strong><br>
+      1. Open Claude → <em>Essay Marker</em> project → upload photos of your written answer<br>
+      2. It marks the essay and returns an <strong>essay JSON</strong> (<code>essay__&lt;paper&gt;__&lt;Q&gt;.json</code>)<br>
+      3. Drop the JSON here and tap Upload<br>
+      4. It lands in <strong>OG-Revise-Essays / &lt;paper&gt;</strong> and appears in the PWA's <strong>✍️ Essays</strong> section<br>
+      <span style="color:var(--text3)">Paper, question number, subject and marks are read from the JSON. Re-uploading the same paper+question overwrites it.</span>
+    </div>
+  </div>
+
+</div><!-- end section-es -->
+
+<!-- LIGHTBOX -->
+<div id="lb" onclick="closeLB()"><img id="lb-img" src=""><button id="lb-close" onclick="closeLB()">✕</button></div>
+
+<script>
+// ═══════════════════════════════════════════
+// ALL FOLDER NAMES — exact match to Drive folders
+// ═══════════════════════════════════════════
+const ALL_FOLDERS = [
+  // OBSTETRICS
+  "Pre-conceptional counselling","Routine antenatal care","Antepartum fetal surveillance",
+  "Miscarriages","Recurrent pregnancy loss (RPL)","Ectopic pregnancy",
+  "Gestational trophoblastic disease (GTD)","NVP / Hyperemesis gravidarum",
+  "Physiology and mechanism of labour","Induction of labour","Intrapartum care",
+  "CTG interpretation","Fetal blood sampling (FBS)","STAN",
+  "Abnormal / dysfunctional labour","Normal postpartum care","Malposition and malpresentation",
+  "Obstetric analgesia","Assisted vaginal delivery","Episiotomy and perineal tears",
+  "ECV","Breech delivery","VBAC","Caesarean section",
+  "Preterm labour","PTL prevention","PROM / PPROM","IUFD",
+  "Reduced fetal movements","Prenatal testing","Antenatal USS","Fetal anomalies",
+  "FGR","Fetal macrosomia","Multiple pregnancies","Fetal infections",
+  "Rh-negative / Anti-D prophylaxis","Management of sensitized patient","Fetal anaemia",
+  "Rheumatoid arthritis in pregnancy","SLE and APLS",
+  "Aortic valvular disease / AS","Mitral valvular disease","Cardiomyopathy",
+  "Congenital heart diseases in pregnancy","IHD in pregnancy","Marfan syndrome",
+  "Skin eruptions in pregnancy","Diabetes in pregnancy","Thyroid disorders in pregnancy",
+  "Prolactinoma in pregnancy","Abdominal pain in pregnancy","Constipation in pregnancy",
+  "Appendicitis in pregnancy","IBD in pregnancy","Anaemia in pregnancy",
+  "Blood transfusion in pregnancy","Thrombocytopenia","Haemophilia and vWD",
+  "VTE — risk reduction","VTE — acute management","Sickle cell disease","Thalassaemia",
+  "Hypertension in pregnancy","HELLP syndrome","COVID-19 in pregnancy","GBS",
+  "Chickenpox / CMV / Hepatitis / Rubella / HSV","HIV / Syphilis in pregnancy",
+  "Bacterial sepsis in pregnancy","Puerperal sepsis",
+  "Acute fatty liver of pregnancy (AFLP)","Intrahepatic cholestasis of pregnancy (ICP)",
+  "Epilepsy in pregnancy","Migraine / headache in pregnancy","Stroke in pregnancy",
+  "Mental health in pregnancy","PPD / PPP","UTI / Pyelonephritis",
+  "Renal diseases (AKI/CKD) in pregnancy","Renal transplant in pregnancy","Asthma in pregnancy",
+  "Fibroids in pregnancy","Breast cancer in pregnancy","Ovarian CA / ovarian cyst in pregnancy",
+  "Cervical cancer in pregnancy","Lymphomas in pregnancy",
+  "Amniotic fluid embolism","Cord prolapse","Uterine inversion","Maternal collapse",
+  "Perimortem caesarean section","PPH","Shoulder dystocia","Uterine rupture","Obstetric hysterectomy",
+  "APH — general","Placental abruption","Placenta praevia / Vasa praevia",
+  "Placenta accreta spectrum (PAS)","Polyhydramnios / Oligohydramnios",
+  "Neonatal resuscitation","Neonatal infections","Common neonatal problems","Breastfeeding problems",
+  // GYNAECOLOGY
+  "Teenage pregnancy","Adolescent gynaecology","AUB — general","Fibroid","Adenomyosis",
+  "Endometrial polyp","COEIN causes of AUB","LARC","Emergency contraception",
+  "POP / injectables","OCP","PPIUD / postpartum contraception","Sterilization",
+  "Normal sex determination","Ambiguous genitalia / DSD","Cervical cancer","Endometrial cancer",
+  "Ovarian cancer","Ovary-Benign cyst / BOT","Vulval cancer","GTN","Cancer genetics (BRCA / Lynch)","Prophylactic BSO",
+  "Menopause","HRT","Premature ovarian insufficiency (POI)","Osteoporosis",
+  "Atrophic vaginitis / Lichen sclerosus / LP","Physiology of menstruation",
+  "Puberty / precocious puberty / delayed puberty","Primary amenorrhoea","Secondary amenorrhoea",
+  "Steroidogenesis","PCOS","Hyperprolactinaemia / Galactorrhoea / pituitary adenomas",
+  "Hirsutism / virilism","Endometriosis","PID / TOA","PMS / PMDD","Bladder pain syndrome",
+  "Dysmenorrhoea","Dyspareunia","Vulvodynia","Female infertility","Male infertility",
+  "Unexplained subfertility","ART / IVF","OI / OHSS","Fertility preservation / surrogacy",
+  "POP-Q assessment","POP management","Vault prolapse","Hypertrophic elongated cervix",
+  "Pelvic anatomy and physiology","Stress urinary incontinence","Overactive bladder (OAB)",
+  "Urodynamics","Fistulae","Vulvovaginal candidiasis (VVC)",
+  "HIV","Bacterial vaginosis","LGV (lymphogranuloma venereum)","Chlamydia","Trichomoniasis (TV)","HSV","Vaginal Discharge","Tuboovarian Abscess / PID","Other",
+  // CLINICAL GOVERNANCE
+  "Clinical governance","Risk management","Audit","Significant event analysis",
+  "Root cause analysis","Duty of Candour","Complaints handling","Whistleblowing",
+  "Appraisal and revalidation","Consent and capacity","Mental capacity assessment",
+  "Advance decisions","Confidentiality","Information governance","Medical records",
+  "Incident reporting","Never events","Maternity dashboard","CNST maternity",
+  "MBRRACE-UK","PMRT","HSIB investigations","Saving Babies Lives care bundle",
+  "Types of study design","Randomised controlled trial","Systematic review and meta-analysis",
+  "Cohort studies","Case-control studies","Cross-sectional studies","Bias and confounding",
+  "Sensitivity and specificity","Positive and negative predictive value","Likelihood ratios",
+  "ROC curves","Number needed to treat (NNT)","Number needed to harm (NNH)",
+  "Relative risk and odds ratio","Absolute risk reduction","Confidence intervals",
+  "P-values and hypothesis testing","Normal distribution","Screening principles",
+  "Critical appraisal","GRADE evidence framework","CONSORT statement","PRISMA statement",
+  "Four principles of medical ethics","Beneficence and non-maleficence","Autonomy and paternalism",
+  "Justice in healthcare","Valid consent","Consent in minors","Fraser guidelines",
+  "Gillick competence","Refusal of treatment","Jehovah Witness blood transfusion",
+  "FGM legal duties","Domestic violence","Sexual assault / rape","Surrogacy law",
+  "Embryo storage and use","Termination of pregnancy law","Mental Health Act",
+  "Safeguarding adults","Safeguarding children","Looked-after children",
+  "Leadership styles in healthcare","Team dynamics and human factors","Situational awareness",
+  "Crew resource management","Authority gradient","Handover SBAR tool","Safety culture",
+  "Psychological safety","Burnout and wellbeing","Equality diversity inclusion",
+  "Health inequalities","Global health MDGs SDGs","Health economics QALYs",
+  "NHS structure and commissioning","NICE role and guidance","National service frameworks",
+  "Clinical networks","Multidisciplinary team working","Simulation in training",
+  "Workplace-based assessment","Surgical procedures","Consent for surgery","Enhanced recovery",
+  "Postoperative care","Surgical site infection prevention","VTE prophylaxis surgical",
+  "Laparoscopy principles complications","Hysteroscopy / Laparoscopy / Colposcopy",
+  "Colposcopy principles","Ultrasound in O&G","Diathermy principles safety",
+  "Surgical smoke hazards","Surgical knots and sutures","Postoperative haemorrhage",
+  "Bowel injury gynaecological surgery","Bladder injury gynaecological surgery",
+  "Ureteric injury gynaecological surgery","Vascular injury laparoscopy",
+  "Nerve injuries gynaecological surgery","Port-site hernia",
+  // TOG — year-based folders (all issues per year)
+  "TOG 2026","TOG 2026 Issue 1","TOG 2026 Issue 2","TOG 2026 Issue 3","TOG 2026 Issue 4",
+  "TOG 2025","TOG 2025 Issue 1","TOG 2025 Issue 2","TOG 2025 Issue 3","TOG 2025 Issue 4",
+  "TOG 2024","TOG 2024 Issue 1","TOG 2024 Issue 2","TOG 2024 Issue 3","TOG 2024 Issue 4",
+  "TOG 2023","TOG 2023 Issue 1","TOG 2023 Issue 2","TOG 2023 Issue 3","TOG 2023 Issue 4",
+  "TOG 2022","TOG 2022 Issue 1","TOG 2022 Issue 2","TOG 2022 Issue 3","TOG 2022 Issue 4",
+  "TOG 2021","TOG 2021 Issue 1","TOG 2021 Issue 2","TOG 2021 Issue 3","TOG 2021 Issue 4",
+  "TOG 2020","TOG 2020 Issue 1","TOG 2020 Issue 2","TOG 2020 Issue 3","TOG 2020 Issue 4",
+  "TOG 2019","TOG 2019 Issue 1","TOG 2019 Issue 2","TOG 2019 Issue 3","TOG 2019 Issue 4",
+  "TOG 2018","TOG 2018 Issue 1","TOG 2018 Issue 2","TOG 2018 Issue 3","TOG 2018 Issue 4",
+  "TOG 2017","TOG 2017 Issue 1","TOG 2017 Issue 2","TOG 2017 Issue 3","TOG 2017 Issue 4",
+  "TOG 2016","TOG 2016 Issue 1","TOG 2016 Issue 2","TOG 2016 Issue 3","TOG 2016 Issue 4"
+];
+
+// ═══════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════
+let STATE = {
+  token: null, folderId: null, clientId: null,
+  queue: [], tWorker: null
+};
+
+// ═══════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════
+window.addEventListener('load', () => {
+  STATE.clientId = localStorage.getItem('og_cid') || '';
+  STATE.folderId = localStorage.getItem('og_fid') || '';
+  const tok = sessionStorage.getItem('og_tok');
+  const exp = parseInt(sessionStorage.getItem('og_exp') || '0');
+  if (tok && Date.now() < exp) { STATE.token = tok; setConnected(true); }
+  if (STATE.clientId) document.getElementById('cfg-cid').value = STATE.clientId;
+  if (STATE.folderId) document.getElementById('cfg-fid').value = STATE.folderId;
+  // Handle OAuth redirect (legacy mode only — in cloud mode any hash token
+  // belongs to Supabase and og-cloud.js owns it)
+  if (!(window.OGCloud && OGCloud.enabled) && window.location.hash.includes('access_token')) {
+    const p = new URLSearchParams(window.location.hash.substring(1));
+    const t = p.get('access_token');
+    const exp2 = Date.now() + parseInt(p.get('expires_in') || '3600') * 1000;
+    if (t) {
+      STATE.token = t;
+      sessionStorage.setItem('og_tok', t);
+      sessionStorage.setItem('og_exp', exp2);
+      window.location.hash = '';
+      setConnected(true);
+      showToast('Connected to Google Drive!', 'green');
+    }
+  }
+  // ── EMBED MODE: running inside the OG Revise PWA as an iframe ──
+  ogEmbedInit();
+  // ── CLOUD MODE (standalone): receive broker tokens after the gate ──
+  if (window.OGCloud && OGCloud.enabled) OGCloud.appReady();
+});
+
+/* Cloud broker → uploader token hook (standalone mode; embed mode gets
+   tokens from the parent PWA via postMessage instead). */
+window.ogCloudApplyToken = function(tok, expMs, folderId){
+  STATE.token = tok;
+  if (folderId) STATE.folderId = folderId;
+  try {
+    sessionStorage.setItem('og_tok', tok);
+    sessionStorage.setItem('og_exp', String(expMs));
+    if (folderId) localStorage.setItem('og_fid', folderId);
+  } catch(e){}
+  setConnected(true);
+};
+
+/* ═══ EMBED BRIDGE (uploader side) ═══
+   When embedded in the PWA (?embed=1), share the parent's Drive session and
+   notify the parent after each successful upload so it can refresh instantly. */
+const OG_EMBED = /[?&]embed=1/.test(location.search);
+let OG_EMBED_TARGET = null;
+function ogEmbedInit(){
+  if (!OG_EMBED) return;
+  document.body.classList.add('og-embedded');
+  // Tell the parent we're ready and want the session.
+  try { parent.postMessage({ type:'og_uploader_ready' }, location.origin); } catch(e){}
+  // Receive session + target from the parent.
+  window.addEventListener('message', (ev) => {
+    if (ev.origin !== location.origin) return;
+    const d = ev.data || {};
+    if (d.type === 'og_uploader_init') {
+      if (d.token) { STATE.token = d.token; sessionStorage.setItem('og_tok', d.token);
+        if (d.exp) sessionStorage.setItem('og_exp', String(d.exp)); }
+      if (d.clientId) { STATE.clientId = d.clientId; localStorage.setItem('og_cid', d.clientId); }
+      if (d.folderId) { STATE.folderId = d.folderId; localStorage.setItem('og_fid', d.folderId); }
+      if (STATE.token) setConnected(true);
+      OG_EMBED_TARGET = d.target || null;
+      ogEmbedApplyTarget();
+    }
+  });
+}
+// Notify the parent PWA that a file was uploaded to a topic.
+function ogNotifyUploaded(topic, kind){
+  if (!OG_EMBED) return;
+  try { parent.postMessage({ type:'og_uploader_uploaded', topic:topic||'', kind:kind||'' }, location.origin); } catch(e){}
+}
+// When pre-targeted from a per-topic "+ Add" button, jump to the right tab and
+// pre-fill the topic so the user only picks a file.
+function ogEmbedApplyTarget(){
+  const t = OG_EMBED_TARGET;
+  if (!t || !t.type) return;
+  if (t.type === 'infographic') {
+    if (typeof switchPage === 'function') switchPage('upload');
+    ogPrefillInfographicFolder(t.topic);
+  } else if (t.type === 'flashcard') {
+    if (typeof switchPage === 'function') switchPage('fc');
+    const el = document.getElementById('fc-topic'); if (el) el.value = t.topic;
+    if (typeof FC_STATE === 'object') FC_STATE.topic = t.topic;
+  } else if (t.type === 'docx') {
+    // Docs are uploaded via the main Uploader tab (infographic/file uploader
+    // handles docx too); pre-fill the folder.
+    if (typeof switchPage === 'function') switchPage('upload');
+    ogPrefillInfographicFolder(t.topic);
+  }
+}
+function ogPrefillInfographicFolder(topic){
+  // Remember the target so the folder picker/upload defaults to it.
+  window.__ogDefaultFolder = topic || '';
+  const banner = document.getElementById('og-embed-target-banner');
+  if (banner) { banner.textContent = topic ? `Uploading into topic: ${topic}` : ''; banner.style.display = topic ? 'block' : 'none'; }
+}
+
+function toggleAuth() {
+  const card = document.getElementById('auth-card');
+  card.style.display = card.style.display === 'none' ? 'block' : 'none';
+}
+
+function connectDrive() {
+  // Cloud mode: nothing to configure — tokens come from the Worker.
+  if (window.OGCloud && OGCloud.enabled) { launchDriveOAuthPopup(''); return; }
+  const cid = document.getElementById('cfg-cid').value.trim();
+  const fid = document.getElementById('cfg-fid').value.trim();
+  if (!cid) { showToast('Enter your Client ID', 'rose'); return; }
+  if (!fid) { showToast('Enter your Folder ID', 'rose'); return; }
+  STATE.clientId = cid; STATE.folderId = fid;
+  localStorage.setItem('og_cid', cid); localStorage.setItem('og_fid', fid);
+  launchDriveOAuthPopup(cid);
+}
+
+function launchDriveOAuthPopup(cid) {
+  if (!cid) { showToast('Enter your Client ID first', 'rose'); toggleAuth(); return; }
+  // Save minimal state for restore after redirect
+  localStorage.setItem('upl_resume', JSON.stringify({ts: Date.now()}));
+  const redir = window.location.origin + window.location.pathname;
+  const scope = 'https://www.googleapis.com/auth/drive';
+  window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(cid)}&redirect_uri=${encodeURIComponent(redir)}&response_type=token&scope=${encodeURIComponent(scope)}`;
+}
+
+function launchDriveOAuthPopup(cid) {
+  // Cloud mode: no popup — silently refresh from the Worker.
+  if (window.OGCloud && OGCloud.enabled) {
+    showToast('Reconnecting Drive…', 'amber');
+    OGCloud.refreshToken(true).then(t => showToast(t ? 'Drive reconnected ✓' : 'Cloud broker unreachable', t ? 'green' : 'rose'));
+    return;
+  }
+  if (typeof OG_EMBED !== 'undefined' && OG_EMBED) {
+    try { parent.postMessage({ type:'og_uploader_need_auth' }, location.origin); } catch(e){}
+    showToast('Reconnect Drive from the main app header, then reopen', 'amber');
+    return;
+  }
+  if (!cid) { showToast('Enter your Client ID first', 'rose'); toggleAuth(); return; }
+  const redir = window.location.origin + window.location.pathname;
+  const scope = 'https://www.googleapis.com/auth/drive';
+  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(cid)}&redirect_uri=${encodeURIComponent(redir)}&response_type=token&scope=${encodeURIComponent(scope)}`;
+  const w=520, h=620;
+  const left=Math.round(screen.width/2-w/2);
+  const top=Math.round(screen.height/2-h/2);
+  const popup = window.open(url,'og_drive_auth_upl',
+    `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no,location=yes,status=no`);
+  if (!popup || popup.closed) {
+    showToast('Allow popups for this site, then try again','rose');
+    return;
+  }
+  const label = document.getElementById('conn-label');
+  if (label) label.textContent = '⟳ Connecting…';
+  // Listen for postMessage from popup OAuth handler script
+  function onMessage(e) {
+    if (!e.data || e.data.type !== 'og_drive_token') return;
+    window.removeEventListener('message', onMessage);
+    clearInterval(closedPoll);
+    const tok = e.data.token;
+    const exp = Date.now() + parseInt(e.data.expiresIn || 3600) * 1000;
+    STATE.token = tok;
+    sessionStorage.setItem('og_tok', tok);
+    sessionStorage.setItem('og_exp', String(exp));
+    setConnected(true);
+    showToast('Connected to Google Drive!', 'green');
+    try { popup.close(); } catch(e) {}
+  }
+  window.addEventListener('message', onMessage);
+  // Watch for cancelled popup
+  const closedPoll = setInterval(() => {
+    if (popup.closed) {
+      clearInterval(closedPoll);
+      window.removeEventListener('message', onMessage);
+      if (!STATE.token) { setConnected(false); showToast('Drive connection cancelled','rose'); }
+    }
+  }, 500);
+}
+
+
+function setConnected(yes) {
+  const badge = document.getElementById('conn-badge');
+  const dot = document.getElementById('conn-dot');
+  const label = document.getElementById('conn-label');
+  if (yes) {
+    badge.className = 'conn-badge connected';
+    dot.className = 'status-dot on';
+    label.textContent = 'Drive Connected';
+    document.getElementById('auth-card').style.display = 'none';
+    document.getElementById('upl-reconnect-popup')?.classList.remove('on');
+    // Badge tap when connected → show toast
+    badge.onclick = () => showToast('Drive connected ✓', 'green');
+  } else {
+    badge.className = 'conn-badge disconnected';
+    dot.className = 'status-dot off';
+    label.textContent = 'Reconnect Drive';
+    badge.onclick = () => {
+      const cid = STATE.clientId || localStorage.getItem('og_cid') || '';
+      if (cid) launchDriveOAuthPopup(cid);
+      else toggleAuth();
+    };
+    if (STATE.token === null) {
+      document.getElementById('upl-reconnect-popup')?.classList.add('on');
+    }
+  }
+}
+
+// ═══════════════════════════════════════════
+// FILES & QUEUE
+// ═══════════════════════════════════════════
+function handleFiles(files) {
+  if (!files || !files.length) return;
+  Array.from(files).forEach(f => {
+    const isImg  = f.type.startsWith('image/');
+    const isDocx = f.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || f.name.endsWith('.docx');
+    const isPdf  = f.type === 'application/pdf' || f.name.endsWith('.pdf');
+    if (isImg || isDocx || isPdf) addItem(f);
+  });
+  renderQueue();
+  runOCR();
+}
+
+function addItem(file) {
+  const id = 'q' + Date.now() + Math.random().toString(36).slice(2,5);
+  STATE.queue.push({
+    id, file,
+    thumb: URL.createObjectURL(file),
+    folder: null, ocrFolder: null,
+    state: 'pending',
+    msg: file.type.startsWith('image/') ? 'Waiting for OCR…' : 'Scanning QR code…',
+    progress: 0,
+    fileType: file.type.startsWith('image/') ? 'image' : (file.name.endsWith('.pdf') || file.type==='application/pdf') ? 'pdf' : 'docx'
+  });
+}
+
+// ═══════════════════════════════════════════
+// OCR
+// ═══════════════════════════════════════════
+// ═══════════════════════════════════════════
+// OCR — UPGRADED
+// Strategy: crop bottom 15% of image where
+// OGRDRIVE label bar lives, run OCR only on
+// that strip — much faster and more accurate
+// ═══════════════════════════════════════════
+async function getWorker() {
+  if (!STATE.tWorker) {
+    setOCRBar('<span class="spin">⟳</span> Initialising OCR engine…');
+    STATE.tWorker = await Tesseract.createWorker('eng', 1, { logger: () => {} });
+    await STATE.tWorker.setParameters({
+      // Wider whitelist to catch all possible chars in folder names
+      tessedit_char_whitelist: 'OGRDIVEogrdivelmnpqrstuvwxyzABCDEFGHJKLMNPQSTUWXYZ0123456789 :-/()&+\'.',
+      // Page segmentation mode 7 = single text line — perfect for label bar
+      tessedit_pageseg_mode: '7',
+    });
+  }
+  return STATE.tWorker;
+}
+
+/* Crop bottom 18% of image to isolate the OGRDRIVE label bar */
+async function cropBottomBar(file) {
+  return new Promise((res) => {
+    const img = new Image();
+    img.onload = () => {
+      const cropH = Math.floor(img.height * 0.18);
+      const cropY = img.height - cropH;
+      const canvas = document.createElement('canvas');
+      canvas.width  = img.width;
+      canvas.height = cropH;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, cropY, img.width, cropH, 0, 0, img.width, cropH);
+      canvas.toBlob(blob => res(blob), 'image/png');
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+/* ── Scan first page of DOCX/PDF for QR code ── */
+async function scanQRFromDoc(file) {
+  return new Promise((res) => {
+    // Render first page to canvas via FileReader → img → canvas
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        // For DOCX: extract thumbnail or use placeholder approach
+        // We use an iframe-based approach via blob URL
+        if (file.name.endsWith('.docx') || file.type.includes('wordprocessingml')) {
+          // Extract QR from DOCX: read as arraybuffer, find embedded image in zip
+          const result = await scanQRFromDocxBlob(e.target.result);
+          res(result);
+        } else {
+          // PDF: render first page to canvas using PDF.js or blob URL
+          const result = await scanQRFromPdfBlob(e.target.result, file);
+          res(result);
+        }
+      } catch(err) { res(null); }
+    };
+    reader.onerror = () => res(null);
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function scanQRFromPdfBlob(buffer, file) {
+  try {
+    // Create blob URL and render in hidden canvas via img tag
+    const blob = new Blob([buffer], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    // Use PDF.js from CDN if available, otherwise return null
+    if (typeof pdfjsLib !== 'undefined') {
+      const pdf = await pdfjsLib.getDocument(url).promise;
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 2.0 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width; canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      return code ? extractFolderFromQR(code.data) : null;
+    }
+    URL.revokeObjectURL(url);
+    return null;
+  } catch { return null; }
+}
+
+async function scanQRFromDocxBlob(buffer) {
+  try {
+    // DOCX is a ZIP — find image in word/media/ folder
+    // Simple approach: use mammoth to render HTML, then check for OGRDRIVE text
+    if (typeof mammoth === 'undefined') return null;
+    const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+    const text = result.value || '';
+    // Look for OGRDRIVE: tag in text (QR content embedded as text too)
+    const m = text.match(/OGRDRIVE[\s\S]*?:\s*([A-Za-z0-9 _\-\/\(\)\.&\+'\.]+?)(?:\n|$)/i);
+    if (m) return findBestMatch(m[1].trim());
+    return null;
+  } catch { return null; }
+}
+
+function extractFolderFromQR(qrText) {
+  if (!qrText) return null;
+  const cleaned = qrText.replace(/\n/g,'').trim();
+  const m = cleaned.match(/OGRDRIVE[\s\S]*?:\s*([A-Za-z0-9 _\-\/\(\)\.&\+']+?)(?:\n|$)/i);
+  if (m) return findBestMatch(m[1].trim());
+  return null;
+}
+
+async function runOCR() {
+  const pending = STATE.queue.filter(i => i.state === 'pending');
+  if (!pending.length) return;
+  setOCRBar(`<span class="spin">⟳</span> Scanning ${pending.length} image${pending.length > 1 ? 's' : ''} for OGRDRIVE label…`);
+
+  for (const item of pending) {
+    item.state = 'ocr'; item.msg = 'Scanning label bar…'; updateItem(item);
+    try {
+      let folder = null;
+
+      if (item.fileType === 'image') {
+        // Image: OCR the bottom bar
+        const worker = await getWorker();
+        const croppedBlob = await cropBottomBar(item.file);
+        if (croppedBlob) {
+          const { data: { text: croppedText } } = await worker.recognize(croppedBlob);
+          folder = extractFolder(croppedText);
+        }
+        if (!folder) {
+          await STATE.tWorker.setParameters({ tessedit_pageseg_mode: '3' });
+          const { data: { text: fullText } } = await worker.recognize(item.file);
+          await STATE.tWorker.setParameters({ tessedit_pageseg_mode: '7' });
+          folder = extractFolder(fullText);
+        }
+        item.msg = folder ? `OCR detected → ${folder}` : 'No OGRDRIVE label — select folder below';
+      } else {
+        // DOCX or PDF: scan QR code from first page
+        item.msg = 'Scanning QR code…';
+        updateItem(item);
+        folder = await scanQRFromDoc(item.file);
+        item.msg = folder ? `QR detected → ${folder}` : 'No QR code found — select folder below';
+      }
+
+      if (folder) {
+        item.ocrFolder = folder;
+        item.folder = folder;
+        item.state = 'ready';
+      } else {
+        item.state = 'warn';
+      }
+    } catch(e) {
+      item.state = 'warn';
+      item.msg = 'Scan failed — select folder below';
+    }
+    updateItem(item);
+  }
+
+  const ok   = STATE.queue.filter(i => i.state === 'ready').length;
+  const warn = STATE.queue.filter(i => i.state === 'warn').length;
+  setOCRBar(warn === 0
+    ? `✅ ${ok} folder${ok > 1 ? 's' : ''} detected automatically`
+    : `🔬 ${ok} auto-detected · ⚠️ ${warn} need folder selection`);
+}
+
+function extractFolder(text) {
+  if (!text) return null;
+
+  // Normalise common OCR errors in the prefix
+  // 0→O, 1→I, 5→S etc near known patterns
+  const cleaned = text
+    .replace(/[|\\]/g, '')
+    .replace(/\r/g, '')
+    .replace(/0GRD/gi, 'OGRD')   // 0 misread as O
+    .replace(/0GRDRIVE/gi, 'OGRDRIVE')
+    .replace(/OGRDR1VE/gi, 'OGRDRIVE')  // 1 misread as I
+    .replace(/OGRDRIV[E3]/gi, 'OGRDRIVE') // 3 misread as E
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Primary match — captures folder name including Part 1/Part 2
+  let m = cleaned.match(/OGRDRIVE\s*[:\-]\s*([A-Za-z0-9 _\-\/\(\)\.&\+\']+?)(?:\n|$)/i);
+  if (m) {
+    const raw = m[1].trim();
+    return findBestMatch(raw);
+  }
+
+  // Line by line fallback
+  for (const line of text.split('\n')) {
+    const lm = line.match(/OGRDRIVE\s*[:\-]\s*(.+)/i);
+    if (lm) {
+      const c = lm[1].trim();
+      if (c.length > 1 && c.length < 120) return findBestMatch(c);
+    }
+  }
+
+  // Last resort: look for any line that looks like a folder name
+  // even if OGRDRIVE prefix was mangled
+  for (const line of cleaned.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.length > 3 && trimmed.length < 80) {
+      const attempt = findBestMatch(trimmed);
+      if (attempt) return attempt;
+    }
+  }
+
+  return null;
+}
+
+function normaliseForMatch(s) {
+  return s
+    .toLowerCase()
+    .replace(/_/g, ' ')
+    .replace(/\bpart\s*[12]\b/g, '') // strip Part 1 / Part 2 for base matching
+    .replace(/\s*\(.*?\)\s*/g, ' ')  // remove bracketed content e.g. (PAS)
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function findBestMatch(raw) {
+  if (!raw) return null;
+  const r = raw.toLowerCase().trim();
+
+  // Handle Part 1 / Part 2 suffix
+  // Extract the part number if present, match base folder
+  const partMatch = r.match(/^(.+?)\s+part\s*([12])\s*$/i);
+  const partSuffix = partMatch ? ` Part ${partMatch[2]}` : '';
+  const baseRaw = partMatch ? partMatch[1].trim() : r;
+
+  // Pass 1: exact match on full string
+  const exact = ALL_FOLDERS.find(f => f.toLowerCase() === r);
+  if (exact) return exact + (partSuffix && !exact.toLowerCase().includes('part') ? partSuffix : '');
+
+  // Pass 2: exact match on base (ignoring Part suffix)
+  const exactBase = ALL_FOLDERS.find(f => f.toLowerCase() === baseRaw);
+  if (exactBase) return exactBase + partSuffix;
+
+  // Pass 3: underscore → space normalisation
+  const rSpaced = baseRaw.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+  const spaced = ALL_FOLDERS.find(f => f.toLowerCase() === rSpaced);
+  if (spaced) return spaced + partSuffix;
+
+  // Pass 4: full normalisation (strip brackets, special chars)
+  const rNorm = normaliseForMatch(raw);
+  const normed = ALL_FOLDERS.find(f => normaliseForMatch(f) === rNorm);
+  if (normed) return normed + partSuffix;
+
+  // Pass 5: starts-with match (handles truncated OCR text)
+  const startsWith = ALL_FOLDERS.find(f => {
+    const fn = normaliseForMatch(f);
+    return fn.startsWith(rNorm) || rNorm.startsWith(fn);
+  });
+  if (startsWith) return startsWith + partSuffix;
+
+  // Pass 6: word overlap scoring
+  const STOP = new Set(['and','the','for','with','from','into','over','after','before',
+    'during','versus','related','associated','management','pregnancy','in']);
+  const rWords = new Set(rNorm.split(' ').filter(w => w.length > 2 && !STOP.has(w)));
+  if (!rWords.size) return null;
+
+  let best = null, bestScore = 0, bestLen = 0;
+  ALL_FOLDERS.forEach(f => {
+    const fn = normaliseForMatch(f);
+    const fWords = new Set(fn.split(' ').filter(w => w.length > 2 && !STOP.has(w)));
+    if (!fWords.size) return;
+    let hits = 0;
+    rWords.forEach(w => { if (fWords.has(w)) hits++; });
+    // Partial word match for abbreviations e.g. "praevia" matches "praevia"
+    rWords.forEach(w => {
+      if (w.length >= 4) fWords.forEach(fw => {
+        if (fw.startsWith(w) || w.startsWith(fw)) hits += 0.4;
+      });
+    });
+    const score = hits / Math.max(rWords.size, fWords.size);
+    if (score > bestScore || (score === bestScore && fn.length > bestLen)) {
+      if (score >= 0.4) { bestScore = score; best = f; bestLen = fn.length; }
+    }
+  });
+
+  return best ? (best + partSuffix) : null;
+}
+
+// ═══════════════════════════════════════════
+// QUEUE UI
+// ═══════════════════════════════════════════
+function renderQueue() {
+  const card = document.getElementById('queue-card');
+  if (!STATE.queue.length) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  updateMeta();
+  const list = document.getElementById('queue-list');
+  list.innerHTML = '';
+  STATE.queue.forEach(item => {
+    const div = document.createElement('div');
+    div.className = `q-item state-${item.state}`;
+    div.id = item.id;
+    div.innerHTML = buildHTML(item);
+    list.appendChild(div);
+  });
+}
+
+function buildHTML(item) {
+  const icons = { pending:'⏳', ocr:'🔬', ready:'✅', warn:'⚠️', uploading:'⟳', done:'✅', error:'❌' };
+  const typeIcon = item.fileType === 'docx' ? '📝' : item.fileType === 'pdf' ? '📕' : '🖼️';
+  const tagClass = item.folder ? (item.ocrFolder === item.folder ? 'ocr' : 'manual') : 'none';
+  const tagText = item.folder
+    ? `${item.ocrFolder === item.folder ? '🔬' : '✏️'} ${item.folder}`
+    : '⚠ No folder selected';
+  const showDropdown = item.state !== 'done' && item.state !== 'uploading';
+  const prog = item.state === 'uploading'
+    ? `<div class="q-progress"><div class="q-progress-bar" id="pb-${item.id}" style="width:${item.progress}%"></div></div>` : '';
+  const removeBtn = (item.state !== 'done' && item.state !== 'uploading')
+    ? `<button class="q-remove" onclick="removeItem('${item.id}')">✕</button>` : '';
+
+  return `
+    <img class="q-thumb" src="${item.thumb}" onclick="openLB('${item.thumb}')">
+    <div class="q-body">
+      <div class="q-name">${item.file.name}</div>
+      <span class="folder-tag-display ${tagClass}">${tagText}</span>
+      ${showDropdown ? buildFolderSelector(item) : ''}
+      <div class="q-status">${icons[item.state] || '•'} ${item.msg}</div>
+      ${prog}
+    </div>
+    ${removeBtn}`;
+}
+
+function buildFolderSelector(item) {
+  return `
+    <div class="folder-selector" id="fs-${item.id}">
+      <span class="folder-search-icon">🔍</span>
+      <input class="folder-search" 
+        placeholder="Search or type folder name…"
+        value="${item.folder || ''}"
+        oninput="filterFolders('${item.id}', this.value)"
+        onfocus="openDropdown('${item.id}')"
+        onblur="setTimeout(()=>closeDropdown('${item.id}'),200)"
+        autocomplete="off">
+      <div class="folder-dropdown" id="fd-${item.id}">
+        ${ALL_FOLDERS.map(f => `
+          <div class="folder-option" onmousedown="selectFolder('${item.id}','${f.replace(/'/g,"\\'")}')">
+            📁 ${f}
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+function filterFolders(itemId, query) {
+  const dd = document.getElementById(`fd-${itemId}`);
+  if (!dd) return;
+  const q = query.toLowerCase();
+  const filtered = q
+    ? ALL_FOLDERS.filter(f => f.toLowerCase().includes(q))
+    : ALL_FOLDERS;
+  dd.innerHTML = filtered.map(f => {
+    const highlighted = f.replace(new RegExp(`(${q})`, 'gi'), '<mark>$1</mark>');
+    return `<div class="folder-option" onmousedown="selectFolder('${itemId}','${f.replace(/'/g,"\\'")}')">📁 ${highlighted}</div>`;
+  }).join('') || `<div class="folder-option" style="color:var(--text3)">No match — type to create new folder</div>`;
+  openDropdown(itemId);
+  // Also update the item folder as user types
+  const item = STATE.queue.find(i => i.id === itemId);
+  if (item && query.trim()) { item.folder = query.trim(); }
+}
+
+function openDropdown(id) {
+  const dd = document.getElementById(`fd-${id}`); if (dd) dd.classList.add('open');
+}
+function closeDropdown(id) {
+  const dd = document.getElementById(`fd-${id}`); if (dd) dd.classList.remove('open');
+}
+
+function selectFolder(itemId, folderName) {
+  const item = STATE.queue.find(i => i.id === itemId);
+  if (!item) return;
+  item.folder = folderName;
+  item.state = 'ready';
+  item.msg = 'Folder selected — ready to upload';
+  updateItem(item);
+}
+
+function updateItem(item) {
+  const el = document.getElementById(item.id);
+  if (!el) { renderQueue(); return; }
+  el.className = `q-item state-${item.state}`;
+  el.innerHTML = buildHTML(item);
+  updateMeta();
+}
+
+function updateMeta() {
+  const t = STATE.queue.length;
+  const d = STATE.queue.filter(i => i.state === 'done').length;
+  const w = STATE.queue.filter(i => !i.folder && i.state !== 'done').length;
+  document.getElementById('q-meta').textContent =
+    `${d}/${t} done${w ? ` · ${w} need folder` : ''}`;
+}
+
+function removeItem(id) {
+  STATE.queue = STATE.queue.filter(i => i.id !== id);
+  if (!STATE.queue.length) { document.getElementById('queue-card').style.display = 'none'; return; }
+  renderQueue();
+}
+
+function clearAll() {
+  STATE.queue = [];
+  document.getElementById('queue-card').style.display = 'none';
+  document.getElementById('summary').classList.remove('show');
+  setOCRBar('');
+}
+
+function setOCRBar(msg) {
+  const el = document.getElementById('ocr-bar');
+  if (!msg) { el.classList.remove('show'); return; }
+  el.innerHTML = msg; el.classList.add('show');
+}
+
+// ═══════════════════════════════════════════
+// UPLOAD — Direct to Google Drive API
+// ═══════════════════════════════════════════
+async function uploadAll() {
+  if (!STATE.token) {
+    showToast('Connect Google Drive first', 'rose');
+    document.getElementById('auth-card').style.display = 'block';
+    return;
+  }
+  const toUpload = STATE.queue.filter(i => i.state === 'ready' || (i.state === 'warn' && i.folder));
+  if (!toUpload.length) { showToast('No images ready — select folders first', 'amber'); return; }
+  document.getElementById('upload-btn').disabled = true;
+  let ok = 0, fail = 0;
+  for (const item of toUpload) {
+    await uploadItem(item);
+    item.state === 'done' ? ok++ : fail++;
+  }
+  document.getElementById('upload-btn').disabled = false;
+  const sum = document.getElementById('summary');
+  if (fail === 0) { sum.className = 'summary show ok'; sum.innerHTML = `✅ ${ok} infographic${ok > 1 ? 's' : ''} saved to Google Drive!`; }
+  else { sum.className = 'summary show warn'; sum.innerHTML = `⚠️ ${ok} saved · ${fail} failed`; }
+  updateMeta();
+}
+
+async function uploadItem(item) {
+  if (!item.folder) { item.state = 'error'; item.msg = 'No folder selected'; updateItem(item); return; }
+  item.state = 'uploading'; item.msg = 'Getting folder…'; item.progress = 5; updateItem(item);
+  const iv = setInterval(() => {
+    if (item.progress < 70) { item.progress += 6; const pb = document.getElementById(`pb-${item.id}`); if (pb) pb.style.width = item.progress + '%'; }
+  }, 300);
+  try {
+    // Step 1: Find or create subfolder
+    const subId = await getOrCreateFolder(item.folder, STATE.folderId);
+    item.msg = 'Uploading image…'; item.progress = 40; updateItem(item);
+    // Step 2: Upload file directly to Drive
+    const fileId = await uploadFileToDrive(item.file, item.folder, subId);
+    clearInterval(iv); item.progress = 100;
+    item.state = 'done';
+    item.msg = `✅ Saved to Drive → ${item.folder}`;
+    ogNotifyUploaded(item.folder, 'infographic');
+  } catch(e) {
+    clearInterval(iv);
+    if (e.status === 401) {
+      STATE.token = null; setConnected(false);
+      item.state = 'error'; item.msg = 'Drive session expired — reconnect and retry';
+      showToast('Drive session expired — please reconnect', 'rose');
+      document.getElementById('upl-reconnect-popup')?.classList.add('on');
+    } else {
+      item.state = 'error'; item.msg = `Failed: ${e.message}`;
+    }
+  }
+  updateItem(item);
+}
+
+async function getOrCreateFolder(name, parentId) {
+  // Search for existing folder
+  const q = `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and name='${name.replace(/'/g,"\\'")}' and trashed=false`;
+  const res = await driveAPI(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`);
+  const data = await res.json();
+  if (data.files && data.files.length > 0) return data.files[0].id;
+  // Create it
+  const createRes = await driveAPI('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
+  });
+  const created = await createRes.json();
+  return created.id;
+}
+
+async function uploadFileToDrive(file, folderName, folderId) {
+  // Use multipart upload — no base64, no corruption
+  const isDocx = file.type.includes('wordprocessingml') || file.name.endsWith('.docx');
+  const isPdf  = file.type === 'application/pdf' || file.name.endsWith('.pdf');
+  const mimeType = isDocx
+    ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    : isPdf ? 'application/pdf' : file.type;
+  const metadata = {
+    name: `${folderName}__${file.name.replace(/[^a-zA-Z0-9._-]/g, '-')}`,
+    mimeType,
+    parents: [folderId]
+  };
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('file', file);
+  const res = await driveAPI(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name',
+    { method: 'POST', body: form }
+  );
+  const data = await res.json();
+  if (!data.id) throw new Error(data.error?.message || 'Upload failed');
+  return data.id;
+}
+
+async function driveAPI(url, opts = {}) {
+  let res = await fetch(url, {
+    ...opts,
+    headers: { ...opts.headers, Authorization: `Bearer ${STATE.token}` }
+  });
+  // Cloud mode: expired token → mint a fresh one from the Worker, retry once.
+  if (res.status === 401 && window.OGCloud && OGCloud.enabled && !opts.__ogRetried) {
+    const nt = await OGCloud.refreshToken(true);
+    if (nt) {
+      STATE.token = nt;
+      return driveAPI(url, { ...opts, __ogRetried: true });
+    }
+  }
+  if (res.status === 401) {
+    // Embedded: nudge the PWA to silently refresh and re-send the session.
+    if (typeof OG_EMBED !== 'undefined' && OG_EMBED) {
+      try { parent.postMessage({ type:'og_uploader_need_auth' }, location.origin); } catch(e) {}
+    }
+    const e = new Error('Unauthorised'); e.status = 401; throw e;
+  }
+  if (!res.ok) { const e = new Error(`Drive API error ${res.status}`); e.status = res.status; throw e; }
+  return res;
+}
+
+// ═══════════════════════════════════════════
+// LIGHTBOX
+// ═══════════════════════════════════════════
+function openLB(src) { document.getElementById('lb-img').src = src; document.getElementById('lb').classList.add('on'); }
+function closeLB() { document.getElementById('lb').classList.remove('on'); }
+
+// ═══════════════════════════════════════════
+// DRAG & DROP
+// ═══════════════════════════════════════════
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', e => { if (!dz.contains(e.relatedTarget)) dz.classList.remove('drag-over'); });
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); });
+document.addEventListener('dragover', e => { if (!dz.contains(e.target)) e.preventDefault(); });
+document.addEventListener('drop', e => { if (!dz.contains(e.target)) { e.preventDefault(); if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); } });
+
+// ═══════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════
+function showToast(msg, color) {
+  const colors = { green: 'rgba(16,185,129,0.15)', rose: 'rgba(244,63,94,0.15)', amber: 'rgba(245,158,11,0.15)' };
+  const borders = { green: 'rgba(16,185,129,0.3)', rose: 'rgba(244,63,94,0.3)', amber: 'rgba(245,158,11,0.3)' };
+  const t = document.createElement('div');
+  t.style.cssText = `position:fixed;bottom:24px;right:20px;background:${colors[color]||colors.green};
+    border:1px solid ${borders[color]||borders.green};border-radius:12px;padding:12px 18px;
+    font-size:13px;color:#f0f4ff;z-index:9999;box-shadow:0 8px 30px rgba(0,0,0,0.5);
+    animation:fadeIn 0.3s ease;max-width:300px`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+// ═══════════════════════════════════════════
+// PAGE TAB SWITCHER
+// ═══════════════════════════════════════════
+function switchPage(page) {
+  ['upload','fc','pp','os','es'].forEach(p => {
+    document.getElementById(`section-${p}`).classList.toggle('on', p === page);
+    const btn = document.getElementById(`tab-${p}`);
+    btn.classList.toggle('on', p === page);
+  });
+  if (page === 'fc') fcInitTopicList();
+  if (page === 'pp') ppInitTopicList();
+  if (page === 'os') osInitTopicList();
+}
+
+// ═══════════════════════════════════════════
+// FLASHCARD MAKER
+// ═══════════════════════════════════════════
+const FC_STATE = { sourceText: '', sourceName: '', topic: '', apiKey: '', driveFiles: [], selectedDriveFile: null, parsedJson: null };
+
+// ── Topic search ──
+function fcTopicSearch(q) {
+  const dd = document.getElementById('fc-topic-dd');
+  const sq = q.trim().toLowerCase();
+  const matches = sq
+    ? ALL_FOLDERS.filter(f => f.toLowerCase().includes(sq))
+    : ALL_FOLDERS.slice(0, 40);
+  if (!matches.length) { dd.style.display = 'none'; return; }
+  const esc = sq.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  dd.innerHTML = matches.slice(0, 40).map(f => {
+    const hi = sq ? f.replace(new RegExp(`(${esc})`, 'gi'), '<mark>$1</mark>') : f;
+    return `<div class="fc-topic-opt" onmousedown="fcPickTopic('${f.replace(/'/g,"\\'")}')">
+      ${hi}</div>`;
+  }).join('');
+  dd.style.display = 'block';
+}
+function fcPickTopic(t) {
+  FC_STATE.topic = t;
+  document.getElementById('fc-topic-search').value = t;
+  document.getElementById('fc-topic-dd').style.display = 'none';
+  document.getElementById('fc-topic-conf').textContent = '✓ ' + t;
+  FC_STATE.sourceText = ''; FC_STATE.selectedDriveFile = null;
+  localStorage.setItem('fc_last_topic', t);
+  fcUpdateDeckPreview();
+}
+
+function fcUpdateDeckPreview() {
+  const topic = FC_STATE.topic;
+  const deck  = (document.getElementById('fc-deck-name')?.value || '').trim();
+  const prev  = document.getElementById('fc-deck-preview');
+  if (!prev) return;
+  if (topic && deck) {
+    const safe = deck.replace(/[<>:"/\\|?*]/g,'').trim();
+    prev.textContent = `→ flashcards__${safe}.json  in  "${topic}"`;
+  } else if (deck) {
+    prev.textContent = '← select a topic folder above';
+  } else { prev.textContent = ''; }
+}
+
+function fcInitTopicList() {
+  const saved = localStorage.getItem('fc_claude_key');
+  if (saved) { document.getElementById('fc-api-key').value = saved; FC_STATE.apiKey = saved; }
+  const savedGemini = localStorage.getItem('fc_gemini_key');
+  if (savedGemini) document.getElementById('fc-gemini-key').value = savedGemini;
+  const savedGroq = localStorage.getItem('fc_groq_key');
+  if (savedGroq) document.getElementById('fc-groq-key').value = savedGroq;
+  const savedCount = parseInt(localStorage.getItem('fc_card_count') || '15');
+  fcSetCount(savedCount);
+  const savedModel = localStorage.getItem('fc_model') || 'haiku';
+  if (savedModel !== 'haiku') {
+    const el = document.getElementById(`model-${savedModel}`);
+    if (el) { el.checked = true; fcModelChange(); }
+  }
+  // Restore last topic
+  const lastTopic = localStorage.getItem('fc_last_topic');
+  if (lastTopic) { fcPickTopic(lastTopic); }
+}
+
+function fcModelChange() {
+  const val = document.querySelector('input[name="fc-model"]:checked')?.value || 'haiku';
+  ['haiku','gemini','sonnet','groq'].forEach(m => {
+    const lbl = document.getElementById(`model-${m}-label`);
+    if(lbl) lbl.style.borderColor = val===m ? 'var(--violet)' : 'var(--bg3)';
+  });
+  document.getElementById('gemini-key-row').style.display = val==='gemini' ? 'block' : 'none';
+  document.getElementById('groq-key-row').style.display   = val==='groq'   ? 'block' : 'none';
+  localStorage.setItem('fc_model', val);
+  const labels = {haiku:'Haiku (~$0.04/doc)', gemini:'Gemini Flash (free)',
+                  groq:'Llama 3.3 via Groq (free)', sonnet:'Sonnet (~$0.25/doc)'};
+  showToast(labels[val]+' selected', 'green');
+}
+
+let FC_CARD_COUNT = 15;
+function fcSetCount(n) {
+  FC_CARD_COUNT = n;
+  [10,15,20].forEach(c => {
+    const btn = document.getElementById(`fc-count-${c}`);
+    if(btn) btn.classList.toggle('on', c===n);
+  });
+  localStorage.setItem('fc_card_count', n);
+}
+
+function fcSaveGroqKey(val)   { localStorage.setItem('fc_groq_key', val.trim()); }
+function fcToggleGroqKey()    { const i=document.getElementById('fc-groq-key'); i.type=i.type==='password'?'text':'password'; }
+function fcSaveGeminiKey(val) { localStorage.setItem('fc_gemini_key', val.trim()); }
+function fcToggleGeminiKey()  { const i=document.getElementById('fc-gemini-key'); i.type=i.type==='password'?'text':'password'; }
+
+function fcSwitchTab(tab) {
+  ['drive','local','json'].forEach(t => {
+    document.getElementById(`fct-${t}`)?.classList.toggle('on', t===tab);
+    document.getElementById(`fcp-${t}`)?.classList.toggle('on', t===tab);
+  });
+}
+
+// ── JSON file handler (from Claude Flashcard project) ──
+function fcHandleJsonFile(file) {
+  if (!file) return;
+  const status = document.getElementById('fc-json-status');
+  const drop   = document.getElementById('fc-json-drop');
+  status.style.color = 'var(--text3)';
+  status.textContent = '⏳ Reading JSON…';
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      let raw = e.target.result;
+      raw = raw.replace(/[\u201c\u201d]/g,'"').replace(/[\u2018\u2019]/g,"'").replace(/,(\s*[}\]])/g,'$1');
+      const s = raw.indexOf('{'), en = raw.lastIndexOf('}');
+      if (s===-1) throw new Error('No JSON object found in file');
+      const data = JSON.parse(raw.slice(s, en+1));
+      const cards = data.cards || [];
+      if (!cards.length) throw new Error('No cards array found in JSON');
+      // Validate card structure
+      if (!cards[0].question || !cards[0].answer) throw new Error('Cards missing question/answer fields');
+      FC_STATE.parsedJson = data;
+      FC_STATE.sourceName = file.name;
+      // Auto-fill deck name from JSON topic if empty
+      const dn = document.getElementById('fc-deck-name');
+      if (dn && !dn.value.trim() && data.topic) { dn.value = data.topic; fcUpdateDeckPreview(); }
+      drop.style.borderColor = 'var(--green)';
+      status.style.color = 'var(--green)';
+      status.textContent = `✅ ${cards.length} cards loaded from ${file.name}`;
+      showToast(`${cards.length} cards ready — select topic & tap Generate`, 'green');
+    } catch(err) {
+      status.style.color = 'var(--rose)';
+      status.textContent = '❌ ' + err.message;
+      showToast('Invalid JSON: ' + err.message, 'rose');
+    }
+  };
+  reader.onerror = () => { status.textContent = '❌ Could not read file'; };
+  reader.readAsText(file);
+}
+
+function fcSaveKey(val) {
+  FC_STATE.apiKey = val.trim();
+  localStorage.setItem('fc_claude_key', FC_STATE.apiKey);
+}
+function fcToggleKey() {
+  const inp = document.getElementById('fc-api-key');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+function fcSetSourceText(text, name) {
+  FC_STATE.sourceText = text || '';
+  FC_STATE.sourceName = name || '';
+}
+
+// ── Local file handling ──
+async function fcHandleLocalFile(file) {
+  if (!file) return;
+  const status = document.getElementById('fc-local-status');
+  const drop = document.getElementById('fc-drop');
+  status.textContent = '⏳ Extracting text…';
+  try {
+    const text = await fcExtractText(file);
+    FC_STATE.sourceText = text;
+    FC_STATE.sourceName = file.name;
+    drop.classList.add('fc-drop-ready');
+    status.textContent = `✅ ${file.name} — ${text.length.toLocaleString()} characters`;
+    showToast('Document ready — tap Generate & Upload', 'green');
+  } catch(e) {
+    status.textContent = '❌ ' + e.message;
+  }
+}
+
+async function fcExtractText(file) {
+  const isDocx = file.name.endsWith('.docx') || file.type.includes('wordprocessingml');
+  const isPdf  = file.name.endsWith('.pdf')  || file.type === 'application/pdf';
+  const isTxt  = file.name.endsWith('.txt')  || file.type === 'text/plain';
+  if (isTxt) return new Promise((res, rej) => {
+    const r = new FileReader(); r.onload = e => res(e.target.result); r.onerror = rej; r.readAsText(file);
+  });
+  const buf = await file.arrayBuffer();
+  if (isDocx) {
+    if (typeof mammoth === 'undefined') throw new Error('mammoth.js not loaded');
+    const result = await mammoth.extractRawText({ arrayBuffer: buf });
+    if (!result.value?.trim()) throw new Error('No text extracted from DOCX');
+    return result.value;
+  }
+  if (isPdf) return fcExtractPdfText(buf);
+  throw new Error('Unsupported file type');
+}
+
+async function fcExtractPdfText(buf) {
+  if (typeof pdfjsLib === 'undefined') {
+    // Lazy-load pdf.js
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      s.onload = res; s.onerror = rej; document.head.appendChild(s);
+    });
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  let text = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    text += tc.items.map(it => it.str).join(' ') + '\n';
+  }
+  if (!text.trim()) throw new Error('No text extracted from PDF');
+  return text;
+}
+
+// ── Drive file picker ──
+async function fcLoadDriveFiles() {
+  const topic = document.getElementById('fc-topic-sel').value;
+  if (!topic) { showToast('Select a topic first', 'amber'); return; }
+  if (!STATE.token || !STATE.folderId) { showToast('Connect Google Drive first', 'rose'); return; }
+  const list = document.getElementById('fc-drive-list');
+  list.innerHTML = '<div style="font-size:12px;color:var(--text3);text-align:center;padding:16px"><span class="spin">⟳</span> Loading…</div>';
+  try {
+    // Find topic subfolder
+    const q1 = encodeURIComponent(`'${STATE.folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+    const r1 = await driveAPI(`https://www.googleapis.com/drive/v3/files?q=${q1}&fields=files(id,name)&pageSize=300`);
+    const d1 = await r1.json();
+    const folders = d1.files || [];
+    // Fuzzy match
+    const topicNorm = topic.toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+    const match = folders.find(f => {
+      const fn = f.name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+      return fn === topicNorm || fn.includes(topicNorm) || topicNorm.includes(fn);
+    });
+    if (!match) { list.innerHTML = '<div style="font-size:12px;color:var(--rose);text-align:center;padding:16px">No Drive folder found for this topic</div>'; return; }
+
+    // List DOCX + PDF in that folder
+    const q2 = encodeURIComponent(`'${match.id}' in parents and (mimeType contains 'wordprocessingml' or mimeType='application/pdf') and trashed=false`);
+    const r2 = await driveAPI(`https://www.googleapis.com/drive/v3/files?q=${q2}&fields=files(id,name,mimeType,modifiedTime,size)&orderBy=modifiedTime desc`);
+    const d2 = await r2.json();
+    const files = d2.files || [];
+    FC_STATE.driveFiles = files;
+
+    if (!files.length) { list.innerHTML = '<div style="font-size:12px;color:var(--text3);text-align:center;padding:16px">No DOCX or PDF files in this topic folder</div>'; return; }
+
+    list.innerHTML = '';
+    files.forEach((f, i) => {
+      const isDocx = f.mimeType.includes('wordprocessingml');
+      const kb = f.size ? (parseInt(f.size)/1024).toFixed(0)+'KB' : '';
+      const date = f.modifiedTime ? new Date(f.modifiedTime).toLocaleDateString() : '';
+      const displayName = f.name.includes('__') ? f.name.split('__').slice(1).join('__').replace(/\.[^.]+$/,'') : f.name.replace(/\.[^.]+$/,'');
+      const div = document.createElement('div');
+      div.className = 'fc-drive-item';
+      div.innerHTML = `<span style="font-size:18px">${isDocx?'📝':'📕'}</span>
+        <div class="fc-drive-name">${displayName}</div>
+        <div class="fc-drive-meta">${date} ${kb}</div>`;
+      div.onclick = () => fcSelectDriveFile(f, div);
+      list.appendChild(div);
+    });
+  } catch(e) {
+    list.innerHTML = `<div style="font-size:12px;color:var(--rose);text-align:center;padding:16px">Error: ${e.message}</div>`;
+  }
+}
+
+async function fcSelectDriveFile(file, el) {
+  document.querySelectorAll('.fc-drive-item').forEach(d => d.classList.remove('sel'));
+  el.innerHTML = el.innerHTML.replace('</div>', ' <span class="spin">⟳</span></div>');
+  try {
+    const r = await driveAPI(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`);
+    const buf = await r.arrayBuffer();
+    const fileObj = new File([buf], file.name, { type: file.mimeType });
+    const text = await fcExtractText(fileObj);
+    FC_STATE.sourceText = text;
+    FC_STATE.sourceName = file.name;
+    FC_STATE.selectedDriveFile = file;
+    el.classList.add('sel');
+    const displayName = file.name.includes('__') ? file.name.split('__').slice(1).join('__').replace(/\.[^.]+$/,'') : file.name;
+    el.innerHTML = `<span style="font-size:18px">✅</span>
+      <div class="fc-drive-name">${displayName}</div>
+      <div class="fc-drive-meta">${text.length.toLocaleString()} chars</div>`;
+    showToast('Document loaded — tap Generate & Upload', 'green');
+  } catch(e) {
+    el.innerHTML = el.innerHTML.replace(/<span class="spin">.*?<\/span>/, '❌ ' + e.message);
+    showToast('Failed to load: ' + e.message, 'rose');
+  }
+}
+
+// ── Progress steps ──
+// ── Error log — accumulates all errors so user can copy & paste to Claude ──
+const FC_ERRORS = [];
+function fcLogError(context, message) {
+  const ts = new Date().toLocaleTimeString();
+  const entry = `[${ts}] ${context}: ${message}`;
+  FC_ERRORS.push(entry);
+  const log = document.getElementById('fc-error-log');
+  const list = document.getElementById('fc-error-list');
+  if (log && list) {
+    log.style.display = 'block';
+    list.textContent = FC_ERRORS.join('\n');
+    list.scrollTop = list.scrollHeight;
+  }
+}
+function fcCopyAllErrors() {
+  if (!FC_ERRORS.length) return;
+  const text = 'OG Revise Flashcard Errors:\n\n' + FC_ERRORS.join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('Errors copied — paste in Claude chat for advice', 'green');
+  }).catch(() => showToast('Copy failed — select the text manually', 'amber'));
+}
+function fcClearErrors() {
+  FC_ERRORS.length = 0;
+  const log = document.getElementById('fc-error-log');
+  const list = document.getElementById('fc-error-list');
+  if (log) log.style.display = 'none';
+  if (list) list.textContent = '';
+}
+
+function fcStep(id, state, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'fc-step ' + state;
+  if (text) {
+    const span = el.querySelector('span');
+    if (state === 'error') {
+      // Log to persistent error panel
+      fcLogError(id, text);
+      // Show inline copy button
+      span.innerHTML = `${text} <button onclick="fcCopyErr(this)" title="Copy error"
+        style="margin-left:6px;background:rgba(244,63,94,0.15);border:1px solid rgba(244,63,94,0.4);
+        color:var(--rose);border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;
+        font-family:var(--font);-webkit-tap-highlight-color:transparent">📋 Copy</button>`;
+    } else {
+      span.textContent = text;
+    }
+  }
+}
+function fcCopyErr(btn) {
+  const text = btn.parentElement.textContent.replace('📋 Copy','').trim();
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = '✓ Copied';
+    setTimeout(() => btn.textContent = '📋 Copy', 2000);
+  }).catch(() => { btn.textContent = 'Select manually'; });
+}
+function fcShowSteps() {
+  document.getElementById('fc-steps').style.display = 'block';
+  ['fcs-read','fcs-gen','fcs-up','fcs-done'].forEach(id => fcStep(id, ''));
+}
+
+// ── Main generate & upload ──
+async function fcGenerate() {
+  const topic    = FC_STATE.topic;
+  const deckName = document.getElementById('fc-deck-name').value.trim();
+  const apiKey   = document.getElementById('fc-api-key').value.trim();
+  const isJson   = !!FC_STATE.parsedJson;
+  const text     = FC_STATE.sourceText;
+
+  if (!topic)    { showToast('Select a topic folder', 'amber'); return; }
+  if (!deckName) { showToast('Enter a deck name (e.g. HSV or CMV)', 'amber'); return; }
+  if (!isJson && !apiKey) { showToast('Enter your Anthropic API key', 'amber'); return; }
+  if (!isJson && !text)   { showToast('Load a document first', 'amber'); return; }
+  if (!STATE.token || !STATE.folderId) { showToast('Connect Google Drive first', 'rose'); return; }
+
+  const btn = document.getElementById('fc-gen-btn');
+  btn.disabled = true;
+  document.getElementById('fc-result-card').style.display = 'none';
+  fcShowSteps();
+
+  const today    = new Date().toISOString().split('T')[0];
+  const safeDeck = deckName.replace(/[<>:"/\\|?*]/g,'').trim();
+  const fcName   = `flashcards__${safeDeck}.json`;
+
+  try {
+    // ── JSON BYPASS — skip AI generation, use Claude project JSON directly ──
+    if (isJson) {
+      const data = FC_STATE.parsedJson;
+      const cards = (data.cards || []).map((c,i) => ({
+        id: c.id || String(i+1),
+        question: c.question, answer: c.answer,
+        due: c.due || today, interval: c.interval ?? 0,
+        easeFactor: c.easeFactor ?? 2.5, reps: c.reps ?? 0
+      }));
+      fcStep('fcs-read', 'done', `JSON ready — ${cards.length} cards from Claude Flashcard project`);
+      fcStep('fcs-gen', 'done', 'Cards loaded — skipping AI generation (free!)');
+      await fcUploadCards(cards, deckName, topic, fcName);
+      FC_STATE.parsedJson = null;
+      // Reset JSON drop
+      const drop = document.getElementById('fc-json-drop');
+      if(drop) drop.style.borderColor='rgba(139,92,246,0.5)';
+      const stat = document.getElementById('fc-json-status');
+      if(stat) { stat.textContent=''; }
+      fcShowCards(cards, deckName);
+      return;
+    }
+
+    // STEP 1 — document ready
+    fcStep('fcs-read', 'done', `Document ready — ${text.length.toLocaleString()} chars`);
+
+    // STEP 2 — Generate with selected model (Haiku default / Gemini free / Sonnet premium)
+    const selectedModel = document.querySelector('input[name="fc-model"]:checked')?.value || 'haiku';
+
+    const cardCount = FC_CARD_COUNT || 15;
+
+    const sysPrompt = `You are an expert flashcard creator for PGIM MD Obstetrics & Gynaecology Part 2 (Sri Lanka), MRCOG Part 2, and MRCOG Part 3.
+
+I have analysed real PGIM exam essays (2016-2025), MRCOG SBA/EMQ recalls (2022-2024), SLCOG mock essays and OSCEs. These exams test clinical thinking and core concepts, not memorised facts.
+
+WHAT THESE EXAMS ACTUALLY TEST:
+1. PATHOPHYSIOLOGY — the mechanism behind the condition, not just the name
+2. CLINICAL REASONING — how to think through a presentation, differential diagnosis with justification
+3. MANAGEMENT PRINCIPLES — the stepwise approach: initial, subsequent, escalation, when surgery
+4. COUNSELLING — what the patient needs to know: risks, benefits, alternatives, success rates, follow-up
+5. COMPLICATIONS — how to recognise, prevent, and manage them
+6. INVESTIGATIONS — which test, what it shows, how to interpret it in context
+7. SURGICAL PRINCIPLES — indications, contraindications, technique principles, post-op care
+8. OBSTETRIC EMERGENCIES — immediate team-based actions, escalation, simultaneous steps
+9. FETAL MEDICINE — surveillance principles, when to intervene, delivery timing
+10. GOVERNANCE — audit cycle, risk management, consent principles, duty of candour, MDT
+11. SBA REASONING — "best next step", "most appropriate management", "most likely diagnosis"
+12. OSCE SKILLS — structured history, patient communication, breaking bad news, obtaining consent
+
+RECURRING HIGH-YIELD PGIM TOPICS (appeared multiple times across years):
+PPH, Pre-eclampsia/eclampsia, Placenta accreta spectrum, IUFD, Preterm labour, Fetal growth restriction, Multiple pregnancy (MCDA), Shoulder dystocia, Maternal collapse, Operative delivery
+AUB/Heavy menstrual bleeding, Endometriosis, Primary amenorrhoea, PCOS, Ovarian cancer genetics, Urinary incontinence (SUI and OAB), Menopause/HRT, Subfertility/IVF
+SLE in pregnancy, Thalassaemia in pregnancy, Cardiac disease in pregnancy, Domestic violence
+Hysteroscopy complications, Laparoscopic principles, Postoperative adhesions
+
+FLASHCARD DESIGN RULES:
+1. Create exactly ${cardCount} cards for TOPIC: ${deckName}
+2. Each card must test ONE core concept that an examiner would ask about
+3. Question types to balance across the deck:
+   a. "What is the pathophysiology/mechanism of X?" — tests understanding not memory
+   b. "A patient presents with [scenario] — what is your immediate management?"
+   c. "What are the PRINCIPLES of managing X?" — logical stepwise approach
+   d. "What are the INDICATIONS for X procedure/intervention?"
+   e. "What complications must you counsel the patient about before X?"
+   f. "How would you explain [diagnosis/procedure/risk] to the patient?"
+   g. "What is the differential diagnosis of X and the key distinguishing features?"
+   h. "What factors determine your choice between X and Y?"
+   i. "What features in the history/examination point toward diagnosis X?"
+   j. "What investigation confirms X and what does it show?"
+   k. ⭐ Flag examiner favourite traps — mistakes candidates commonly make in viva/OSCE
+
+4. ANSWER RULES — balance completeness with conciseness:
+   - 2-3 sentences maximum
+   - First sentence: the direct answer / key clinical point
+   - Second sentence: the reasoning, mechanism, or clinical context that makes it memorable
+   - Third sentence (only if essential): important exception, contraindication, or next step
+   - Use active clinical language: "Manage with...", "This occurs because...", "The key distinction is..."
+   - Avoid long lists — if listing is essential, keep it to 3 items maximum
+   - No vague generalities — every answer must contain a specific clinical fact
+
+5. Do NOT include: drug doses, specific percentages, lab reference ranges, MCQ options
+6. Do NOT fabricate — source document only
+7. FOCUS ON: core concepts that transfer to the exam room, clinical reasoning chains, "why" behind decisions
+
+OUTPUT: Reply with ONLY valid JSON, no markdown, no fences, no explanation. Start with { end with }.
+Format: {"topic":"${deckName}","cards":[{"id":"1","question":"...","answer":"...","due":"${today}","interval":0,"easeFactor":2.5,"reps":0}]}`;
+
+    const userMsg = `DECK: ${deckName}\nTOPIC FOLDER: ${topic}\n\nDOCUMENT TEXT:\n${text.slice(0, 80000)}`;
+
+    // ── JSON parser (shared by all models) ──
+    function parseCards(raw) {
+      let c = raw.replace(/\`\`\`(?:json)?/gi,'').replace(/\`\`\`/g,'').trim();
+      c = c.replace(/[\u201c\u201d]/g,'"').replace(/[\u2018\u2019]/g,"'").replace(/,(\s*[}\]])/g,'$1');
+      const s=c.indexOf('{'), e=c.lastIndexOf('}');
+      if(s===-1||e===-1) throw new Error('No JSON object in response');
+      const d=JSON.parse(c.slice(s,e+1));
+      const cards=d.cards||[];
+      if(!cards.length) throw new Error('Zero cards returned — AI may not have followed format');
+      return {topic:d.topic||deckName, cards};
+    }
+
+    // ── Claude API call — HARD CAP: max 2 calls per generation (never loops) ──
+    let claudeCallCount = 0;
+    async function callClaude(model, retrySmall=false) {
+      claudeCallCount++;
+      // Safety hard cap — never make more than 2 calls regardless of what happens
+      if(claudeCallCount > 2) throw new Error('Safety limit: max 2 API calls per generation reached. No further retries to protect your credits.');
+      const claudeId = model==='sonnet' ? 'claude-sonnet-4-6' : 'claude-haiku-4-5';
+      if(!apiKey) throw new Error('No Anthropic API key — enter it in the API Key field above');
+      const callLabel = retrySmall ? ` (retry ${claudeCallCount}/2)` : ` (call ${claudeCallCount}/2 max)`;
+      const retryNote = retrySmall ? '\nIMPORTANT: Generate only 10 cards maximum. Keep answers very concise (1-2 sentences). You MUST output complete valid JSON — do not truncate.' : '';
+      const maxTok = model==='sonnet' ? 8192 : (retrySmall ? 8192 : 8192);
+      fcStep('fcs-gen','active', `Generating with ${model==='sonnet'?'Sonnet':'Haiku'}${callLabel}…`);
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method:'POST',
+        headers:{'Content-Type':'application/json','x-api-key':apiKey,
+          'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+        body:JSON.stringify({model:claudeId, max_tokens:maxTok,
+          system:sysPrompt+retryNote, messages:[{role:'user',content:userMsg}]})
+      });
+      if(!r.ok){
+        const e=await r.json().catch(()=>({}));
+        const m=e.error?.message||'';
+        if(r.status===401) throw new Error('Invalid Anthropic API key — check console.anthropic.com');
+        if(r.status===429) throw new Error('Anthropic credit exhausted or rate limited — check console.anthropic.com');
+        throw new Error(`Claude ${r.status}: ${m.slice(0,120)}`);
+      }
+      const d=await r.json();
+      const raw=d.content?.[0]?.text||'';
+      // Truncated response — retry ONCE only (claudeCallCount guard prevents further retries)
+      if(d.stop_reason==='max_tokens' && !retrySmall) {
+        fcLogError('callClaude', `Response truncated (hit ${maxTok} token limit). Retrying with 10 cards max — this is call ${claudeCallCount+1} of 2 max.`);
+        fcStep('fcs-gen','active','Response truncated — retrying with 10 cards (final attempt)…');
+        return callClaude(model, true);
+      }
+      try {
+        return parseCards(raw);
+      } catch(parseErr) {
+        if(!retrySmall) {
+          fcLogError('callClaude', `JSON parse failed: ${parseErr.message} — retrying with 10 cards (final attempt, call ${claudeCallCount+1} of 2 max).`);
+          fcStep('fcs-gen','active','JSON error — retrying with 10 cards (final attempt)…');
+          return callClaude(model, true);
+        }
+        // Already retried — give up, show clear message
+        throw new Error(`JSON parse failed on retry. Likely Haiku produced malformed output. Raw starts: ${raw.slice(0,150)}`);
+      }
+    }
+
+    // ── Gemini API call (free tier) ──
+    async function callGemini() {
+      const gKey=(document.getElementById('fc-gemini-key')?.value||'').trim()||localStorage.getItem('fc_gemini_key')||'';
+      if(!gKey) throw new Error('No Gemini API key — enter it in the Gemini key field');
+      // Free-tier safety: ~600k chars ≈ 150k tokens (well within 1M context but safe for RPM)
+      if(userMsg.length>600000) throw new Error(
+        `Document too large for Gemini free tier (${Math.round(userMsg.length/1000)}k chars > 600k). Free tier supports up to ~150k tokens per request.`);
+      const url=`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=\${gKey}`;
+      let r;
+      try {
+        r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({contents:[{parts:[{text:sysPrompt+'\n\n'+userMsg}]}],
+            generationConfig:{temperature:0.3,maxOutputTokens:4096}})});
+      } catch(e){ throw new Error('Network error reaching Gemini — check internet connection'); }
+      if(!r.ok){
+        const e=await r.json().catch(()=>({}));
+        const m=(e.error?.message||e.error?.status||'').slice(0,150);
+        if(r.status===400) throw new Error(`Gemini rejected the request (400) — likely invalid API key. ${m}`);
+        if(r.status===403) throw new Error(`Gemini API key lacks permission (403) — check aistudio.google.com. \${m}`);
+        if(r.status===429) throw new Error(`Gemini daily free quota exceeded (429) — you have used all 1,500 free requests today. Try again tomorrow or switch to Haiku.`);
+        if(r.status===404) throw new Error(`Gemini model not found (404) — gemini-1.5-flash unavailable on this key.`);
+        if(r.status===503) throw new Error(`Gemini servers temporarily unavailable (503) — Google side issue. Try again in a minute.`);
+        throw new Error(`Gemini error ${r.status}: ${m}`);
+      }
+      const d=await r.json();
+      const raw=d.candidates?.[0]?.content?.parts?.[0]?.text||'';
+      const reason=d.candidates?.[0]?.finishReason||d.promptFeedback?.blockReason||'';
+      if(!raw) throw new Error(`Gemini returned empty response (reason: ${reason||'unknown'}) — content may have been blocked or quota hit.`);
+      return parseCards(raw);
+    }
+
+    // ── Groq API call (free — Llama 3.3 70B) ──
+    async function callGroq() {
+      const gKey=(document.getElementById('fc-groq-key')?.value||'').trim()||localStorage.getItem('fc_groq_key')||'';
+      if(!gKey) throw new Error('No Groq API key — enter it in the Groq key field above');
+      let r;
+      try {
+        r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method:'POST',
+          headers:{'Content-Type':'application/json','Authorization':`Bearer ${gKey}`},
+          body:JSON.stringify({
+            model:'llama-3.3-70b-versatile',
+            messages:[
+              {role:'system', content:sysPrompt},
+              {role:'user',   content:userMsg}
+            ],
+            temperature:0.3,
+            max_tokens:6000
+          })
+        });
+      } catch(e){ throw new Error('Network error reaching Groq — check internet connection'); }
+      if(!r.ok){
+        const e=await r.json().catch(()=>({}));
+        const m=(e.error?.message||'').slice(0,150);
+        if(r.status===401) throw new Error(`Groq: Invalid API key (401). Get a free key at console.groq.com. ${m}`);
+        if(r.status===429) throw new Error(`Groq: Rate limit hit (429) — free tier allows 30 req/min. Wait 1 minute and try again.`);
+        if(r.status===503) throw new Error(`Groq: Service unavailable (503) — Groq servers busy. Try again in a moment.`);
+        throw new Error(`Groq error ${r.status}: ${m}`);
+      }
+      const d=await r.json();
+      const raw=d.choices?.[0]?.message?.content||'';
+      if(!raw) throw new Error('Groq returned empty response — try again');
+      return parseCards(raw);
+    }
+    let parsed;
+
+    // ── Reusable 5-second countdown → Haiku fallback ──
+    async function countdownFallback(failedModelName, reason) {
+      fcStep('fcs-gen', 'error', `${failedModelName} failed: ${reason}`);
+      const titleEl = document.getElementById('fc-countdown-title');
+      if(titleEl) titleEl.textContent = `${failedModelName} failed`;
+      const stopped = await new Promise(resolve => {
+        const box=document.getElementById('fc-countdown-box');
+        const numEl=document.getElementById('fc-countdown-n');
+        const rsn=document.getElementById('fc-countdown-reason');
+        const stopBtn=document.getElementById('fc-countdown-stop');
+        rsn.textContent=reason.slice(0,120);
+        box.style.display='block'; numEl.textContent='5';
+        let secs=5, userStopped=false;
+        const tick=setInterval(()=>{
+          secs--; numEl.textContent=secs;
+          if(secs<=0){clearInterval(tick); if(!userStopped) resolve(false);}
+        },1000);
+        stopBtn.onclick=()=>{userStopped=true;clearInterval(tick);box.style.display='none';resolve(true);};
+      });
+      document.getElementById('fc-countdown-box').style.display='none';
+      if(stopped) throw new Error(`Stopped by user. ${failedModelName} failed: ${reason}. Fix your API key or switch to Haiku manually.`);
+      fcStep('fcs-gen','active','Switching to Haiku 4.5...');
+      const result = await callClaude('haiku');
+      fcStep('fcs-gen','done',`Generated ${result.cards.length} cards with Haiku (${failedModelName} failed: ${reason.slice(0,45)}...)`);
+      return result;
+    }
+
+    // ── MAIN: dispatch to selected model with 5s fallback ──
+    if (selectedModel === 'groq') {
+      fcStep('fcs-gen', 'active', 'Generating with Llama 3.3 via Groq (free)...');
+      try {
+        parsed = await callGroq();
+        fcStep('fcs-gen', 'done', `Generated ${parsed.cards.length} cards with Llama 3.3 via Groq`);
+      } catch(err) { parsed = await countdownFallback('Groq/Llama', err.message); }
+    } else if (selectedModel === 'gemini') {
+      fcStep('fcs-gen', 'active', 'Trying Gemini 1.5 Flash (free)...');
+      try {
+        parsed = await callGemini();
+        fcStep('fcs-gen', 'done', `Generated ${parsed.cards.length} cards with Gemini Flash`);
+      } catch(err) { parsed = await countdownFallback('Gemini', err.message); }
+    } else if (selectedModel === 'sonnet') {
+      fcStep('fcs-gen', 'active', 'Generating with Sonnet 4.6 (deep reasoning)...');
+      parsed = await callClaude('sonnet');
+      fcStep('fcs-gen', 'done', `Generated ${parsed.cards.length} cards with Sonnet 4.6`);
+    } else {
+      fcStep('fcs-gen', 'active', 'Generating with Haiku 4.5...');
+      parsed = await callClaude('haiku');
+      fcStep('fcs-gen', 'done', `Generated ${parsed.cards.length} cards with Haiku 4.5`);
+    }
+
+    const cards = parsed.cards || [];
+    if (!cards.length) throw new Error('No cards generated — try again');
+
+
+    // STEP 3 — upload
+    await fcUploadCards(cards, deckName, topic, fcName);
+    fcShowCards(cards, deckName);
+
+  } catch(e) {
+    const step = ['fcs-read','fcs-gen','fcs-up','fcs-done'].find(id => document.getElementById(id)?.classList.contains('active')) || 'fcs-gen';
+    fcStep(step, 'error', '❌ ' + e.message);
+    fcLogError(`Step:${step} | Model:${document.querySelector('input[name="fc-model"]:checked')?.value||'haiku'} | Doc:${deckName}`, e.message);
+    showToast('Failed: ' + e.message.slice(0,80), 'rose');
+  } finally {
+    document.getElementById('fc-gen-btn').disabled = false;
+  }
+}
+
+// ── Shared upload — used by AI generation AND JSON bypass ──
+async function fcUploadCards(cards, deckName, topic, fcName) {
+  fcStep('fcs-up', 'active', 'Finding Drive folder...');
+  const q1 = encodeURIComponent(`'${STATE.folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const r1 = await driveAPI(`https://www.googleapis.com/drive/v3/files?q=${q1}&fields=files(id,name)&pageSize=300`);
+  const d1 = await r1.json();
+  const topicNorm = topic.toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+  // EXACT match only — loose includes() matching caused decks to land in the wrong
+  // folder (e.g. "Male infertility TOG" matching a "TOG" folder). Match the typed
+  // topic to a folder of the same name; otherwise create that exact folder.
+  let folderMatch = (d1.files||[]).find(f => {
+    const fn = f.name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+    return fn === topicNorm;
+  });
+  if (!folderMatch) {
+    fcStep('fcs-up', 'active', `Creating folder "${topic}"...`);
+    const cr = await driveAPI('https://www.googleapis.com/drive/v3/files', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name:topic,mimeType:'application/vnd.google-apps.folder',parents:[STATE.folderId]})
+    });
+    folderMatch = await cr.json();
+  }
+  fcStep('fcs-up', 'active', `Checking for existing "${deckName}" deck...`);
+  const exactQ = encodeURIComponent(`'${folderMatch.id}' in parents and name='${fcName}' and trashed=false`);
+  const exactR = await driveAPI(`https://www.googleapis.com/drive/v3/files?q=${exactQ}&fields=files(id,name)&pageSize=1`);
+  const exactD = await exactR.json();
+  const existingFile = (exactD.files||[])[0]||null;
+  let finalCards = cards;
+  if (existingFile) {
+    try {
+      const er = await driveAPI(`https://www.googleapis.com/drive/v3/files/${existingFile.id}?alt=media`);
+      const ed = await er.json();
+      const existing = ed.cards||[];
+      const byQ = new Map(existing.map(c=>[c.question.toLowerCase().trim(),c]));
+      cards.forEach(nc=>{
+        const k=nc.question.toLowerCase().trim();
+        if(!byQ.has(k)){byQ.set(k,nc);existing.push(nc);}
+        else{byQ.get(k).answer=nc.answer;}
+      });
+      finalCards = existing;
+    } catch(e){}
+  }
+  fcStep('fcs-up', 'active', 'Uploading...');
+  const payload = JSON.stringify({topic:deckName,cards:finalCards},null,2);
+  if (existingFile) {
+    await driveAPI(`https://www.googleapis.com/upload/drive/v3/files/${existingFile.id}?uploadType=media`,
+      {method:'PATCH',headers:{'Content-Type':'application/json'},body:payload});
+  } else {
+    const meta={name:fcName,parents:[folderMatch.id],mimeType:'application/json'};
+    const form=new FormData();
+    form.append('metadata',new Blob([JSON.stringify(meta)],{type:'application/json'}));
+    form.append('file',new Blob([payload],{type:'application/json'}));
+    await driveAPI('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',body:form});
+  }
+  fcStep('fcs-up', 'done', `Uploaded "${deckName}" to ${topic}`);
+  fcStep('fcs-done', 'done', `✅ ${finalCards.length} cards saved — open OG Revise PWA`);
+  showToast(`✅ ${cards.length} "${deckName}" cards saved`, 'green');
+  ogNotifyUploaded(topic, 'flashcard');
+}
+
+
+function fcShowCards(cards, topic) {
+  const card = document.getElementById('fc-result-card');
+  const list = document.getElementById('fc-cards-list');
+  const title = document.getElementById('fc-result-title');
+  title.textContent = `✅ ${cards.length} flashcards — ${topic}`;
+  list.innerHTML = cards.map((c, i) => `
+    <div class="fc-card-item">
+      ${c.question.includes('⭐') ? '<div class="fc-card-badge">⭐ HIGH YIELD</div>' : ''}
+      <div class="fc-card-q">Q${i+1}. ${c.question.replace('⭐','').trim()}</div>
+      <div class="fc-card-a">${c.answer}</div>
+    </div>`).join('');
+  card.style.display = 'block';
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Drag & drop for local FC file
+const fcDrop = document.getElementById('fc-drop');
+if (fcDrop) {
+  fcDrop.addEventListener('dragover', e => { e.preventDefault(); fcDrop.classList.add('over'); });
+  fcDrop.addEventListener('dragleave', () => fcDrop.classList.remove('over'));
+  fcDrop.addEventListener('drop', e => {
+    e.preventDefault(); fcDrop.classList.remove('over');
+    if (e.dataTransfer.files[0]) fcHandleLocalFile(e.dataTransfer.files[0]);
+  });
+}
+
+// Drag & drop for JSON file — with strict .json validation
+const fcJsonDrop = document.getElementById('fc-json-drop');
+if (fcJsonDrop) {
+  fcJsonDrop.addEventListener('dragover', e => {
+    e.preventDefault();
+    // Check if dragged item is a JSON file
+    const items = e.dataTransfer.items;
+    const isJson = items && Array.from(items).some(item =>
+      item.type === 'application/json' || item.type === ''
+    );
+    fcJsonDrop.classList.add('over');
+    fcJsonDrop.style.borderColor = 'var(--violet)';
+  });
+  fcJsonDrop.addEventListener('dragleave', e => {
+    if (!fcJsonDrop.contains(e.relatedTarget)) {
+      fcJsonDrop.classList.remove('over');
+      fcJsonDrop.style.borderColor = 'rgba(139,92,246,0.5)';
+    }
+  });
+  fcJsonDrop.addEventListener('drop', e => {
+    e.preventDefault();
+    fcJsonDrop.classList.remove('over');
+    fcJsonDrop.style.borderColor = 'rgba(139,92,246,0.5)';
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    // Validate it's a JSON file
+    const isJson = file.name.toLowerCase().endsWith('.json') || file.type === 'application/json';
+    if (!isJson) {
+      // Not a JSON file — flash red and vanish the indicator
+      const status = document.getElementById('fc-json-status');
+      if (status) {
+        status.style.color = 'var(--rose)';
+        status.textContent = `❌ "${file.name}" is not a JSON file — drop a .json file here`;
+        setTimeout(() => { status.textContent = ''; }, 3000);
+      }
+      fcJsonDrop.style.borderColor = 'rgba(244,63,94,0.5)';
+      setTimeout(() => { fcJsonDrop.style.borderColor = 'rgba(139,92,246,0.5)'; }, 1500);
+      return;
+    }
+    fcHandleJsonFile(file);
+  });
+}
+
+// ═══════════════════════════════════════════
+// EXAM PAPERS (SBA / EMQ)
+// ═══════════════════════════════════════════
+const PP_STATE = { topic:'', parsed:null, fileName:'', category:'', subcategory:'' };
+const PP_ROOT_FOLDER = 'OG-Revise-Papers';
+const PP_TAXONOMY = {
+  "Obstetrics": ["Antenatal care","Intrapartum care","Medical disorders in pregnancy","Obstetric emergencies","Postnatal care"],
+  "Gynaecology": ["Adolescent gynaecology","Benign gynaecology","Oncology","Subfertility","Urogynaecology and POP"],
+  "TOG": ["2026 TOG","2025 TOG","2024 TOG","2023 TOG","2022 TOG","2021 TOG","2020 TOG","2019 TOG","2018 TOG","2017 TOG","2016 TOG"],
+  "Statistics": [],
+  "Paper books": []
+};
+
+function ppInitTopicList(){
+  const last = localStorage.getItem('pp_last_topic');
+  if (last) {
+    PP_STATE.topic = last;
+    const inp = document.getElementById('pp-topic-search'); if (inp) inp.value = last;
+    const conf = document.getElementById('pp-topic-conf'); if (conf) conf.textContent = '✓ ' + last;
+  }
+  const lastCat = localStorage.getItem('pp_last_cat');
+  if (lastCat){ const cs=document.getElementById('pp-category'); if(cs){ cs.value=lastCat; ppCatChange(true); } }
+}
+
+// ── Category / subcategory ──
+function ppCatChange(fromInit){
+  const cat = document.getElementById('pp-category').value;
+  PP_STATE.category = cat;
+  if(cat) localStorage.setItem('pp_last_cat', cat);
+  const subSel = document.getElementById('pp-subcategory');
+  const subFree = document.getElementById('pp-subcategory-free');
+  const hint = document.getElementById('pp-sub-hint');
+  const subs = PP_TAXONOMY[cat] || [];
+  if (cat && subs.length){
+    // fixed dropdown
+    subSel.style.display='block'; subFree.style.display='none';
+    subSel.innerHTML = `<option value="">— select section —</option>` +
+      subs.map(s=>`<option value="${s.replace(/"/g,'&quot;')}">${s}</option>`).join('');
+    hint.textContent = '(required)';
+  } else if (cat){
+    // Statistics / Paper books → optional free-type
+    subSel.style.display='none'; subFree.style.display='block';
+    if(!fromInit) subFree.value='';
+    hint.textContent = '(optional)';
+  } else {
+    subSel.style.display='block'; subFree.style.display='none';
+    subSel.innerHTML = `<option value="">— select category first —</option>`;
+    hint.textContent='';
+  }
+  PP_STATE.subcategory = '';
+  ppUpdateUploadBtn();
+}
+function ppSubSelectChange(){ PP_STATE.subcategory = document.getElementById('pp-subcategory').value; ppUpdateUploadBtn(); }
+function ppSubFreeChange(){ PP_STATE.subcategory = document.getElementById('pp-subcategory-free').value.trim(); ppUpdateUploadBtn(); }
+
+function ppSetCategoryUI(cat, sub){
+  // used to auto-fill from JSON (overridable)
+  if(cat){ const cs=document.getElementById('pp-category'); if(cs && PP_TAXONOMY[cat]!==undefined){ cs.value=cat; ppCatChange(true); } }
+  if(sub){
+    const subs = PP_TAXONOMY[cat]||[];
+    if(subs.length){ const ss=document.getElementById('pp-subcategory'); if(ss){ ss.value=sub; PP_STATE.subcategory=sub; } }
+    else { const sf=document.getElementById('pp-subcategory-free'); if(sf){ sf.value=sub; PP_STATE.subcategory=sub; } }
+  }
+  ppUpdateUploadBtn();
+}
+
+function ppSeparateToggle(){
+  const on=document.getElementById('pp-separate').checked;
+  document.getElementById('pp-sep-name-wrap').style.display = on?'block':'none';
+  if(on){
+    // default the display name to the topic if empty
+    const nm=document.getElementById('pp-sep-name');
+    if(nm && !nm.value){ nm.value = (PP_STATE.topic||document.getElementById('pp-topic-search').value||'').trim(); ppSepNamePreview(); }
+  }
+  ppUpdateUploadBtn();
+}
+function ppSepNamePreview(){
+  const v=(document.getElementById('pp-sep-name').value||'').trim();
+  document.getElementById('pp-sep-name-conf').textContent = v?('✓ '+v):'';
+}
+
+function ppTopicSearch(q){
+  const dd = document.getElementById('pp-topic-dd');
+  const sq = q.trim().toLowerCase();
+  const matches = sq ? ALL_FOLDERS.filter(f => f.toLowerCase().includes(sq)) : ALL_FOLDERS.slice(0,40);
+  if (!matches.length){ dd.style.display='none'; return; }
+  const esc = sq.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  dd.innerHTML = matches.slice(0,40).map(f=>{
+    const hi = sq ? f.replace(new RegExp(`(${esc})`,'gi'),'<mark>$1</mark>') : f;
+    return `<div class="fc-topic-opt" onmousedown="ppPickTopic('${f.replace(/'/g,"\\'")}')">${hi}</div>`;
+  }).join('');
+  dd.style.display='block';
+}
+function ppPickTopic(t){
+  PP_STATE.topic = t;
+  document.getElementById('pp-topic-search').value = t;
+  document.getElementById('pp-topic-dd').style.display='none';
+  document.getElementById('pp-topic-conf').textContent = '✓ ' + t;
+  localStorage.setItem('pp_last_topic', t);
+  ppUpdateUploadBtn();
+}
+
+function ppHandleJsonFile(file){
+  if (!file) return;
+  const status = document.getElementById('pp-json-status');
+  const drop   = document.getElementById('pp-json-drop');
+  status.style.color = 'var(--text3)';
+  status.textContent = '⏳ Reading JSON…';
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      let raw = e.target.result;
+      raw = raw.replace(/[\u201c\u201d]/g,'"').replace(/[\u2018\u2019]/g,"'").replace(/,(\s*[}\]])/g,'$1');
+      const s = raw.indexOf('{'), en = raw.lastIndexOf('}');
+      if (s===-1) throw new Error('No JSON object found in file');
+      const data = JSON.parse(raw.slice(s, en+1));
+      const errs = ppValidate(data);
+      if (errs.length) throw new Error(errs[0]);
+      PP_STATE.parsed = data;
+      PP_STATE.fileName = file.name;
+      // Auto-fill topic from JSON if blank
+      const inp = document.getElementById('pp-topic-search');
+      const tag = data.folderTag || data.topic || '';
+      if (inp && !inp.value.trim() && tag){ ppPickTopic(tag); }
+      // Auto-fill category/subcategory from JSON (overridable)
+      if (data.category){ ppSetCategoryUI(data.category, data.subcategory||''); }
+      drop.style.borderColor = 'var(--green)';
+      status.style.color = 'var(--green)';
+      const ns = (data.sba||[]).length, ne = (data.emq||[]).reduce((a,g)=>a+(g.stems||[]).length,0);
+      status.textContent = `✅ ${ns} SBA · ${ne} EMQ stems loaded`;
+      ppRenderPreview(data);
+      ppUpdateUploadBtn();
+      showToast(`Paper ready — ${ns} SBA, ${ne} EMQ`, 'green');
+    } catch(err){
+      status.style.color = 'var(--rose)';
+      status.textContent = '❌ ' + err.message;
+      PP_STATE.parsed = null;
+      document.getElementById('pp-preview').style.display='none';
+      ppUpdateUploadBtn();
+      showToast('Invalid paper: ' + err.message, 'rose');
+    }
+  };
+  reader.onerror = () => { status.textContent = '❌ Could not read file'; };
+  reader.readAsText(file);
+}
+
+function ppValidate(d){
+  const e = [];
+  if (typeof d !== 'object' || !d) { e.push('Not a JSON object'); return e; }
+  const sba = d.sba || [], emq = d.emq || [];
+  if (!Array.isArray(sba) || !Array.isArray(emq)) { e.push('sba/emq must be arrays'); return e; }
+  if (!sba.length && !emq.length) { e.push('No SBA or EMQ questions found'); return e; }
+  sba.forEach((q,i)=>{
+    if (!q.stem || !q.lead) e.push(`SBA ${i+1}: missing stem/lead`);
+    if (!Array.isArray(q.options) || q.options.length !== 5) e.push(`SBA ${i+1}: needs exactly 5 options`);
+    if (!Number.isInteger(q.answer) || q.answer<0 || q.answer> (q.options?.length||0)-1) e.push(`SBA ${i+1}: answer index out of range`);
+    if (!q.rationale) e.push(`SBA ${i+1}: missing rationale`);
+  });
+  emq.forEach((g,i)=>{
+    if (!Array.isArray(g.options) || g.options.length<2) e.push(`EMQ ${i+1}: needs an options list`);
+    if (!Array.isArray(g.stems) || !g.stems.length) e.push(`EMQ ${i+1}: needs stems`);
+    (g.stems||[]).forEach((st,j)=>{
+      if (!st.stem) e.push(`EMQ ${i+1}.${j+1}: missing stem`);
+      if (!Number.isInteger(st.answer) || st.answer<0 || st.answer>(g.options?.length||0)-1) e.push(`EMQ ${i+1}.${j+1}: answer index out of range`);
+    });
+  });
+  return e;
+}
+
+function ppRenderPreview(d){
+  const box = document.getElementById('pp-preview');
+  const sba = d.sba||[], emq = d.emq||[];
+  let h = `<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Preview</div>`;
+  if (d.source) h += `<div style="font-size:11px;color:var(--text3);margin-bottom:8px">📖 ${ppEsc(d.source)}</div>`;
+  if (sba.length){
+    h += `<div style="font-size:12px;font-weight:700;color:var(--text1);margin:6px 0 4px">🅰️ SBA · ${sba.length}</div>`;
+    h += sba.slice(0,3).map((q,i)=>`<div style="font-size:11px;color:var(--text2);padding:6px 9px;background:var(--bg2);border-radius:7px;border:1px solid var(--bg3);margin-bottom:4px"><strong>Q${i+1}.</strong> ${ppEsc((q.stem||'').slice(0,90))}…</div>`).join('');
+    if (sba.length>3) h += `<div style="font-size:10px;color:var(--text3);padding:2px 4px">+ ${sba.length-3} more…</div>`;
+  }
+  if (emq.length){
+    h += `<div style="font-size:12px;font-weight:700;color:var(--text1);margin:8px 0 4px">🔠 EMQ · ${emq.length} set${emq.length>1?'s':''}</div>`;
+    h += emq.map(g=>`<div style="font-size:11px;color:var(--text2);padding:6px 9px;background:var(--bg2);border-radius:7px;border:1px solid var(--bg3);margin-bottom:4px"><strong>${ppEsc(g.theme||'Set')}</strong> — ${(g.stems||[]).length} stems, ${(g.options||[]).length} options</div>`).join('');
+  }
+  box.innerHTML = h;
+  box.style.display = 'block';
+}
+function ppEsc(s){ return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function ppUpdateUploadBtn(){
+  const btn = document.getElementById('pp-upload-btn');
+  if (!btn) return;
+  const subs = PP_TAXONOMY[PP_STATE.category];
+  const subRequired = PP_STATE.category && subs && subs.length>0;
+  const ok = PP_STATE.parsed && PP_STATE.topic && PP_STATE.category && (!subRequired || PP_STATE.subcategory);
+  btn.style.display = ok ? 'block' : 'none';
+}
+
+function ppStep(id, state, text){
+  let el = document.getElementById(id);
+  const wrap = document.getElementById('pp-steps');
+  if (!el){ el = document.createElement('div'); el.id = id; el.style.cssText='font-size:12px;padding:7px 11px;border-radius:8px;margin-bottom:5px;display:flex;align-items:center;gap:8px'; wrap.appendChild(el); }
+  const icon = state==='done'?'✅':state==='err'?'❌':'⏳';
+  const col = state==='done'?'rgba(16,185,129,0.1)':state==='err'?'rgba(244,63,94,0.1)':'rgba(245,158,11,0.1)';
+  el.style.background = col;
+  el.innerHTML = `<span>${icon}</span><span style="color:var(--text2)">${text}</span>`;
+}
+
+async function ppUpload(){
+  if (!PP_STATE.parsed){ showToast('Load a paper JSON first','rose'); return; }
+  if (!PP_STATE.topic){ showToast('Pick a topic first','rose'); return; }
+  if (!PP_STATE.category){ showToast('Pick a category first','rose'); return; }
+  const subsReq = (PP_TAXONOMY[PP_STATE.category]||[]).length>0;
+  if (subsReq && !PP_STATE.subcategory){ showToast('Pick a section first','rose'); return; }
+  if (!STATE.token){ showToast('Connect Google Drive first (Uploader tab)','rose'); switchPage('upload'); return; }
+  if (!STATE.folderId){ showToast('Set your root Folder ID first (Uploader tab)','rose'); switchPage('upload'); return; }
+  document.getElementById('pp-steps').innerHTML = '';
+  try {
+    ppStep('pps-folder','active','Building folder path…');
+    // OG-Revise-Papers / Category / [Subcategory]
+    const rootId = await getOrCreateFolder(PP_ROOT_FOLDER, STATE.folderId);
+    const catId  = await getOrCreateFolder(PP_STATE.category, rootId);
+    let targetId = catId;
+    let pathLabel = `${PP_ROOT_FOLDER}/${PP_STATE.category}`;
+    if (PP_STATE.subcategory){
+      targetId = await getOrCreateFolder(PP_STATE.subcategory, catId);
+      pathLabel += `/${PP_STATE.subcategory}`;
+    }
+    ppStep('pps-folder','done',`Path: ${pathLabel}`);
+
+    const safeTopic = PP_STATE.topic.replace(/[<>:"/\\|?*]/g,'').trim();
+    const separate = document.getElementById('pp-separate') && document.getElementById('pp-separate').checked;
+    const displayName = separate ? ((document.getElementById('pp-sep-name').value||'').trim() || PP_STATE.topic) : PP_STATE.topic;
+    // For a separate paper, give the file a unique name so it never merges with an existing one
+    const fileName = separate
+      ? `papers__${safeTopic.replace(/\s+/g,'_')}__${Date.now().toString(36)}.json`
+      : `papers__${safeTopic}.json`;
+
+    let existing = null;
+    if (separate){
+      ppStep('pps-check','done','Saving as a NEW separate paper');
+    } else {
+      ppStep('pps-check','active',`Checking for existing "${fileName}"…`);
+      // Search anywhere under the papers tree for this filename (may be in old category)
+      const anyQ = encodeURIComponent(`name='${fileName.replace(/'/g,"\\'")}' and trashed=false`);
+      const anyR = await driveAPI(`https://www.googleapis.com/drive/v3/files?q=${anyQ}&fields=files(id,name,parents)&pageSize=5`);
+      const anyD = await anyR.json();
+      existing = (anyD.files||[])[0]||null;
+    }
+
+    // Build payload (merge if existing) + embed category metadata
+    let payload = PP_STATE.parsed;
+    payload.topic = displayName || payload.topic || PP_STATE.topic;
+    payload.folderTag = PP_STATE.topic;
+    payload.category = PP_STATE.category;
+    payload.subcategory = PP_STATE.subcategory || '';
+    payload.schema = 'ogr-paper-v1';
+    if (separate) payload.variant = (displayName||'').trim();
+    if (!payload.created) payload.created = new Date().toISOString().split('T')[0];
+
+    if (existing){
+      ppStep('pps-check','done','Found existing paper — merging');
+      try {
+        const er = await driveAPI(`https://www.googleapis.com/drive/v3/files/${existing.id}?alt=media`);
+        const old = await er.json();
+        payload = ppMerge(old, payload);
+        payload.category = PP_STATE.category;
+        payload.subcategory = PP_STATE.subcategory || '';
+      } catch(e){ /* if read fails, just overwrite with new */ }
+    } else {
+      ppStep('pps-check','done','New paper');
+    }
+
+    ppStep('pps-up','active','Uploading…');
+    const body = JSON.stringify(payload, null, 2);
+    if (existing){
+      // update content
+      await driveAPI(`https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=media`,
+        { method:'PATCH', headers:{'Content-Type':'application/json'}, body });
+      // move to the correct folder if it lives elsewhere
+      const curParents = existing.parents||[];
+      if (!curParents.includes(targetId)){
+        const removeParents = curParents.join(',');
+        await driveAPI(`https://www.googleapis.com/drive/v3/files/${existing.id}?addParents=${targetId}&removeParents=${encodeURIComponent(removeParents)}&fields=id,parents`,
+          { method:'PATCH' });
+        ppStep('pps-move','done',`Moved into ${pathLabel}`);
+      }
+    } else {
+      const meta = { name:fileName, parents:[targetId], mimeType:'application/json' };
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(meta)],{type:'application/json'}));
+      form.append('file', new Blob([body],{type:'application/json'}));
+      await driveAPI('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', { method:'POST', body:form });
+    }
+    const ns=(payload.sba||[]).length, ne=(payload.emq||[]).reduce((a,g)=>a+(g.stems||[]).length,0);
+    ppStep('pps-up','done',`Saved ${fileName}`);
+    ppStep('pps-done','done',`✅ ${ns} SBA + ${ne} EMQ stems — open OG Revise PWA → 🧪 Papers`);
+    showToast(`✅ Paper "${payload.topic}" saved`, 'green');
+    // reset the separate-paper toggle so the next upload starts clean
+    const sepCb=document.getElementById('pp-separate');
+    if(sepCb && sepCb.checked){ sepCb.checked=false; ppSeparateToggle(); const nm=document.getElementById('pp-sep-name'); if(nm) nm.value=''; ppSepNamePreview(); }
+  } catch(err){
+    if (err.status===401){ STATE.token=null; setConnected(false); ppStep('pps-up','err','Session expired — reconnect Drive'); showToast('Drive session expired — reconnect','rose'); }
+    else { ppStep('pps-up','err',err.message||'Upload failed'); showToast('Upload failed: '+(err.message||''),'rose'); }
+  }
+}
+
+// Merge two papers: de-dupe SBA by stem text, EMQ sets by theme then stems by stem text
+function ppMerge(oldP, newP){
+  const out = { ...oldP };
+  out.schema='ogr-paper-v1';
+  out.topic = newP.topic || oldP.topic;
+  out.folderTag = newP.folderTag || oldP.folderTag;
+  out.source = newP.source || oldP.source;
+  out.description = newP.description || oldP.description;
+  out.created = oldP.created || newP.created;
+  out.updated = new Date().toISOString().split('T')[0];
+  out.category = newP.category || oldP.category || '';
+  out.subcategory = newP.subcategory!==undefined ? newP.subcategory : (oldP.subcategory||'');
+  // Preserve attempt history if PWA wrote any
+  if (oldP.attempts) out.attempts = oldP.attempts;
+
+  // SBA merge
+  const sba = Array.isArray(oldP.sba)?[...oldP.sba]:[];
+  const sbaKeys = new Set(sba.map(q=>(q.stem||'').toLowerCase().trim()));
+  (newP.sba||[]).forEach(q=>{ const k=(q.stem||'').toLowerCase().trim(); if(!sbaKeys.has(k)){ sba.push(q); sbaKeys.add(k);} });
+  // re-id
+  sba.forEach((q,i)=>q.id=`sba${i+1}`);
+  out.sba = sba;
+
+  // EMQ merge by theme
+  const emq = Array.isArray(oldP.emq)?oldP.emq.map(g=>({...g,stems:[...(g.stems||[])]})):[];
+  (newP.emq||[]).forEach(ng=>{
+    const match = emq.find(g=>(g.theme||'').toLowerCase().trim()===(ng.theme||'').toLowerCase().trim());
+    if (match){
+      const keys = new Set(match.stems.map(s=>(s.stem||'').toLowerCase().trim()));
+      (ng.stems||[]).forEach(s=>{ const k=(s.stem||'').toLowerCase().trim(); if(!keys.has(k)){ match.stems.push(s); keys.add(k);} });
+    } else { emq.push(ng); }
+  });
+  emq.forEach((g,i)=>g.id=`emq${i+1}`);
+  out.emq = emq;
+  return out;
+}
+
+// Drag & drop for paper JSON
+const ppJsonDrop = document.getElementById('pp-json-drop');
+if (ppJsonDrop){
+  ppJsonDrop.addEventListener('dragover', e=>{ e.preventDefault(); ppJsonDrop.classList.add('over'); });
+  ppJsonDrop.addEventListener('dragleave', ()=>ppJsonDrop.classList.remove('over'));
+  ppJsonDrop.addEventListener('drop', e=>{
+    e.preventDefault(); ppJsonDrop.classList.remove('over');
+    const file=e.dataTransfer.files[0];
+    if (file && (file.name.endsWith('.json')||file.type==='application/json')) ppHandleJsonFile(file);
+    else showToast('Please drop a .json file','rose');
+  });
+}
+
+// ═══════════════════════════════════════════
+// OSCE STATIONS
+// ═══════════════════════════════════════════
+const OS_STATE = { topic:'', parsed:null, fileName:'', category:'', subcategory:'' };
+const OS_ROOT_FOLDER = 'OG-Revise-OSCE';
+const OS_TAXONOMY = PP_TAXONOMY; // same categories
+
+function osInitTopicList(){
+  const last = localStorage.getItem('os_last_topic');
+  if (last){ OS_STATE.topic=last; const inp=document.getElementById('os-topic-search'); if(inp) inp.value=last; const conf=document.getElementById('os-topic-conf'); if(conf) conf.textContent='✓ '+last; }
+  const lastCat = localStorage.getItem('os_last_cat');
+  if (lastCat){ const cs=document.getElementById('os-category'); if(cs){ cs.value=lastCat; osCatChange(true); } }
+}
+function osCatChange(fromInit){
+  const cat=document.getElementById('os-category').value;
+  OS_STATE.category=cat;
+  if(cat) localStorage.setItem('os_last_cat',cat);
+  const subSel=document.getElementById('os-subcategory'), subFree=document.getElementById('os-subcategory-free'), hint=document.getElementById('os-sub-hint');
+  const subs=OS_TAXONOMY[cat]||[];
+  if(cat&&subs.length){
+    subSel.style.display='block'; subFree.style.display='none';
+    subSel.innerHTML=`<option value="">— select section —</option>`+subs.map(s=>`<option value="${s.replace(/"/g,'&quot;')}">${s}</option>`).join('');
+    hint.textContent='(required)';
+  } else if(cat){
+    subSel.style.display='none'; subFree.style.display='block';
+    if(!fromInit) subFree.value='';
+    hint.textContent='(optional)';
+  } else {
+    subSel.style.display='block'; subFree.style.display='none';
+    subSel.innerHTML=`<option value="">— select category first —</option>`;
+    hint.textContent='';
+  }
+  OS_STATE.subcategory='';
+  osUpdateUploadBtn();
+}
+function osSubSelectChange(){ OS_STATE.subcategory=document.getElementById('os-subcategory').value; osUpdateUploadBtn(); }
+function osSubFreeChange(){ OS_STATE.subcategory=document.getElementById('os-subcategory-free').value.trim(); osUpdateUploadBtn(); }
+function osSetCategoryUI(cat, sub){
+  if(cat){ const cs=document.getElementById('os-category'); if(cs && OS_TAXONOMY[cat]!==undefined){ cs.value=cat; osCatChange(true); } }
+  if(sub){
+    const subs=OS_TAXONOMY[cat]||[];
+    if(subs.length){ const ss=document.getElementById('os-subcategory'); if(ss){ ss.value=sub; OS_STATE.subcategory=sub; } }
+    else { const sf=document.getElementById('os-subcategory-free'); if(sf){ sf.value=sub; OS_STATE.subcategory=sub; } }
+  }
+  osUpdateUploadBtn();
+}
+function osTopicSearch(q){
+  const dd=document.getElementById('os-topic-dd');
+  const sq=q.trim().toLowerCase();
+  const matches=sq?ALL_FOLDERS.filter(f=>f.toLowerCase().includes(sq)):ALL_FOLDERS.slice(0,40);
+  if(!matches.length){ dd.style.display='none'; return; }
+  const esc=sq.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  dd.innerHTML=matches.slice(0,40).map(f=>{ const hi=sq?f.replace(new RegExp(`(${esc})`,'gi'),'<mark>$1</mark>'):f; return `<div class="fc-topic-opt" onmousedown="osPickTopic('${f.replace(/'/g,"\\'")}')">${hi}</div>`; }).join('');
+  dd.style.display='block';
+}
+function osPickTopic(t){
+  OS_STATE.topic=t;
+  document.getElementById('os-topic-search').value=t;
+  document.getElementById('os-topic-dd').style.display='none';
+  document.getElementById('os-topic-conf').textContent='✓ '+t;
+  localStorage.setItem('os_last_topic',t);
+  osUpdateUploadBtn();
+}
+function osHandleJsonFile(file){
+  if(!file) return;
+  const status=document.getElementById('os-json-status'), drop=document.getElementById('os-json-drop');
+  status.style.color='var(--text3)'; status.textContent='⏳ Reading JSON…';
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      let raw=e.target.result;
+      raw=raw.replace(/[\u201c\u201d]/g,'"').replace(/[\u2018\u2019]/g,"'").replace(/,(\s*[}\]])/g,'$1');
+      const s=raw.indexOf('{'), en=raw.lastIndexOf('}');
+      if(s===-1) throw new Error('No JSON object found');
+      const data=JSON.parse(raw.slice(s,en+1));
+      const errs=osValidate(data);
+      if(errs.length) throw new Error(errs[0]);
+      OS_STATE.parsed=data; OS_STATE.fileName=file.name;
+      const inp=document.getElementById('os-topic-search');
+      const tag=(data.meta&&data.meta.title)||data.topic||'';
+      if(inp&&!inp.value.trim()&&tag) osPickTopic(tag);
+      const cat=data.category||(data.meta&&data.meta.category);
+      const sub=data.subcategory||(data.meta&&data.meta.subcategory);
+      if(cat) osSetCategoryUI(cat, sub||'');
+      drop.style.borderColor='var(--green)'; status.style.color='var(--green)';
+      const nq=(data.questions||[]).length, tm=(data.meta&&data.meta.total_marks)||'?';
+      status.textContent=`✅ ${nq} questions · ${tm} marks`;
+      osRenderPreview(data); osUpdateUploadBtn();
+      showToast(`Station ready — ${nq} questions`,'green');
+    }catch(err){
+      status.style.color='var(--rose)'; status.textContent='❌ '+err.message;
+      OS_STATE.parsed=null; document.getElementById('os-preview').style.display='none'; osUpdateUploadBtn();
+      showToast('Invalid station: '+err.message,'rose');
+    }
+  };
+  reader.onerror=()=>{ status.textContent='❌ Could not read file'; };
+  reader.readAsText(file);
+}
+function osValidate(d){
+  const e=[];
+  if(typeof d!=='object'||!d){ e.push('Not a JSON object'); return e; }
+  if(!d.meta||!d.meta.title) e.push('Missing meta.title');
+  if(!d.scenario||!d.scenario.reading_time) e.push('Missing scenario.reading_time');
+  const qs=d.questions;
+  if(!Array.isArray(qs)||!qs.length){ e.push('No questions[] found'); return e; }
+  qs.forEach((q,i)=>{
+    if(!q.question) e.push(`Q${i+1}: missing question text`);
+    if(!Number.isFinite(q.marks)) e.push(`Q${i+1}: missing marks`);
+    const ms=q.marking_scheme;
+    if(!ms||!Array.isArray(ms.key_points)||!ms.key_points.length) e.push(`Q${i+1}: missing marking_scheme.key_points`);
+    else ms.key_points.forEach((k,j)=>{ if(!k.point) e.push(`Q${i+1}.${j+1}: key point missing 'point'`); if(!Number.isFinite(k.marks)) e.push(`Q${i+1}.${j+1}: key point missing marks`); });
+  });
+  return e;
+}
+function osRenderPreview(d){
+  const box=document.getElementById('os-preview');
+  const m=d.meta||{}, qs=d.questions||[];
+  let h=`<div style="font-size:11px;font-weight:700;color:var(--blue);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Preview</div>`;
+  h+=`<div style="font-size:13px;font-weight:700;color:var(--text1)">${osUEsc(m.title||'')}</div>`;
+  if(m.source) h+=`<div style="font-size:11px;color:var(--text3);margin:4px 0 8px">📖 ${osUEsc(m.source)}</div>`;
+  h+=`<div style="font-size:11px;color:var(--text2);margin-bottom:8px">${qs.length} questions · ${m.total_marks||'?'} marks · ${m.duration_minutes||15} min · pass ${m.pass_mark||'?'}</div>`;
+  h+=qs.slice(0,4).map((q,i)=>`<div style="font-size:11px;color:var(--text2);padding:6px 9px;background:var(--bg1);border-radius:7px;border:1px solid var(--bg3);margin-bottom:4px"><strong>Q${i+1}</strong> (${q.marks}m): ${osUEsc((q.question||'').slice(0,80))}…</div>`).join('');
+  if(qs.length>4) h+=`<div style="font-size:10px;color:var(--text3);padding:2px 4px">+ ${qs.length-4} more…</div>`;
+  box.innerHTML=h; box.style.display='block';
+}
+function osUEsc(s){ return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function osUpdateUploadBtn(){
+  const btn=document.getElementById('os-upload-btn'); if(!btn) return;
+  const subs=OS_TAXONOMY[OS_STATE.category];
+  const subReq=OS_STATE.category&&subs&&subs.length>0;
+  const ok=OS_STATE.parsed&&OS_STATE.topic&&OS_STATE.category&&(!subReq||OS_STATE.subcategory);
+  btn.style.display=ok?'block':'none';
+}
+function osStep(id,state,text){
+  let el=document.getElementById(id); const wrap=document.getElementById('os-steps');
+  if(!el){ el=document.createElement('div'); el.id=id; el.style.cssText='font-size:12px;padding:7px 11px;border-radius:8px;margin-bottom:5px;display:flex;align-items:center;gap:8px'; wrap.appendChild(el); }
+  const icon=state==='done'?'✅':state==='err'?'❌':'⏳';
+  const col=state==='done'?'rgba(16,185,129,0.1)':state==='err'?'rgba(244,63,94,0.1)':'rgba(0,212,255,0.1)';
+  el.style.background=col; el.innerHTML=`<span>${icon}</span><span style="color:var(--text2)">${text}</span>`;
+}
+async function osUpload(){
+  if(!OS_STATE.parsed){ showToast('Load a station JSON first','rose'); return; }
+  if(!OS_STATE.topic){ showToast('Pick a topic first','rose'); return; }
+  if(!OS_STATE.category){ showToast('Pick a category first','rose'); return; }
+  const subsReq=(OS_TAXONOMY[OS_STATE.category]||[]).length>0;
+  if(subsReq&&!OS_STATE.subcategory){ showToast('Pick a section first','rose'); return; }
+  if(!STATE.token){ showToast('Connect Google Drive first','rose'); switchPage('upload'); return; }
+  if(!STATE.folderId){ showToast('Set your root Folder ID first','rose'); switchPage('upload'); return; }
+  document.getElementById('os-steps').innerHTML='';
+  try{
+    osStep('oss-folder','active','Building folder path…');
+    const rootId=await getOrCreateFolder(OS_ROOT_FOLDER, STATE.folderId);
+    const catId=await getOrCreateFolder(OS_STATE.category, rootId);
+    let targetId=catId, pathLabel=`${OS_ROOT_FOLDER}/${OS_STATE.category}`;
+    if(OS_STATE.subcategory){ targetId=await getOrCreateFolder(OS_STATE.subcategory, catId); pathLabel+=`/${OS_STATE.subcategory}`; }
+    osStep('oss-folder','done',`Path: ${pathLabel}`);
+
+    const safeTopic=OS_STATE.topic.replace(/[<>:"/\\|?*]/g,'').trim();
+    const fileName=`osce__${safeTopic}.json`;
+
+    osStep('oss-check','active',`Checking for existing "${fileName}"…`);
+    const anyQ=encodeURIComponent(`name='${fileName.replace(/'/g,"\\'")}' and trashed=false`);
+    const anyR=await driveAPI(`https://www.googleapis.com/drive/v3/files?q=${anyQ}&fields=files(id,name,parents)&pageSize=5`);
+    const existing=((await anyR.json()).files||[])[0]||null;
+
+    let payload=OS_STATE.parsed;
+    payload.category=OS_STATE.category;
+    payload.subcategory=OS_STATE.subcategory||'';
+    if(!payload.meta) payload.meta={};
+    payload.meta.category=OS_STATE.category;
+    payload.meta.subcategory=OS_STATE.subcategory||'';
+
+    if(existing){
+      osStep('oss-check','done','Found existing — will overwrite (keeping attempts)');
+      try{
+        const er=await driveAPI(`https://www.googleapis.com/drive/v3/files/${existing.id}?alt=media`);
+        const old=await er.json();
+        if(Array.isArray(old.attempts)) payload.attempts=old.attempts; // preserve history
+      }catch(e){}
+    } else { osStep('oss-check','done','New station'); }
+
+    osStep('oss-up','active','Uploading…');
+    const body=JSON.stringify(payload,null,2);
+    if(existing){
+      await driveAPI(`https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=media`,{method:'PATCH',headers:{'Content-Type':'application/json'},body});
+      const curParents=existing.parents||[];
+      if(!curParents.includes(targetId)){
+        await driveAPI(`https://www.googleapis.com/drive/v3/files/${existing.id}?addParents=${targetId}&removeParents=${encodeURIComponent(curParents.join(','))}&fields=id,parents`,{method:'PATCH'});
+        osStep('oss-move','done',`Moved into ${pathLabel}`);
+      }
+    } else {
+      const meta={ name:fileName, parents:[targetId], mimeType:'application/json' };
+      const form=new FormData();
+      form.append('metadata', new Blob([JSON.stringify(meta)],{type:'application/json'}));
+      form.append('file', new Blob([body],{type:'application/json'}));
+      await driveAPI('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',body:form});
+    }
+    osStep('oss-done','done',`✅ Saved ${fileName} — open OG Revise PWA → 🎙️ OSCE`);
+    showToast(`✅ Station "${OS_STATE.topic}" saved`,'green');
+  }catch(err){
+    if(err.status===401){ STATE.token=null; setConnected(false); osStep('oss-up','err','Session expired — reconnect Drive'); showToast('Drive session expired','rose'); }
+    else { osStep('oss-up','err',err.message||'Upload failed'); showToast('Upload failed: '+(err.message||''),'rose'); }
+  }
+}
+// Drag & drop
+const osJsonDrop=document.getElementById('os-json-drop');
+if(osJsonDrop){
+  osJsonDrop.addEventListener('dragover',e=>{ e.preventDefault(); osJsonDrop.classList.add('over'); });
+  osJsonDrop.addEventListener('dragleave',()=>osJsonDrop.classList.remove('over'));
+  osJsonDrop.addEventListener('drop',e=>{
+    e.preventDefault(); osJsonDrop.classList.remove('over');
+    const file=e.dataTransfer.files[0];
+    if(file&&(file.name.endsWith('.json')||file.type==='application/json')) osHandleJsonFile(file);
+    else showToast('Please drop a .json file','rose');
+  });
+}
+
+// ═══════════════════════════════════════════
+// ESSAY UPLOADER
+// ═══════════════════════════════════════════
+const ES_ROOT_FOLDER = 'OG-Revise-Essays';
+const ES_STATE = { parsed:null, fileName:null };
+
+function esStep(id, state, msg){
+  let el=document.getElementById(id);
+  const steps=document.getElementById('es-steps');
+  if(!el){ el=document.createElement('div'); el.id=id; el.style.cssText='font-size:12px;padding:6px 0;display:flex;align-items:center;gap:8px'; steps.appendChild(el); }
+  const ic = state==='done'?'✅':state==='err'?'❌':state==='active'?'⏳':'•';
+  const col = state==='done'?'#34d399':state==='err'?'#f43f5e':state==='active'?'#a78bfa':'var(--text3)';
+  el.innerHTML=`<span>${ic}</span><span style="color:${col}">${msg}</span>`;
+}
+
+function esHandleJsonFile(file){
+  if(!file){ return; }
+  const status=document.getElementById('es-json-status');
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const data=JSON.parse(reader.result);
+      if(data.type!=='essay'){ status.innerHTML='<span style="color:#f59e0b">⚠ This JSON is not an essay file (missing "type":"essay"). Uploading anyway is allowed.</span>'; }
+      ES_STATE.parsed=data;
+      ES_STATE.fileName=file.name;
+      esRenderPreview(data);
+      status.innerHTML=`<span style="color:#34d399">✓ Loaded ${file.name}</span>`;
+      document.getElementById('es-upload-btn').style.display='block';
+    }catch(e){
+      status.innerHTML=`<span style="color:#f43f5e">❌ Invalid JSON: ${e.message}</span>`;
+      document.getElementById('es-upload-btn').style.display='none';
+    }
+  };
+  reader.readAsText(file);
+}
+
+function esRenderPreview(d){
+  const box=document.getElementById('es-preview');
+  const pct = d.percentage!=null?d.percentage:(d.totalMarks?Math.round((d.awardedMarks/d.totalMarks)*100):'?');
+  const bandColor = d.band==='Distinction'?'#10b981':d.band==='Clear pass'?'#34d399':d.band==='Borderline'?'#f59e0b':'#f43f5e';
+  const schemeN = Array.isArray(d.markScheme)?d.markScheme.length:0;
+  box.style.display='block';
+  box.innerHTML=`
+    <div style="background:var(--bg2);border:1px solid var(--bg3);border-radius:12px;padding:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="font-size:14px;font-weight:700;color:var(--text1)">${esEsc(d.paperLabel||d.paper||'?')} · ${esEsc(d.questionNo||'?')}</div>
+        <div style="font-size:13px;font-weight:800;color:${bandColor};font-family:var(--mono)">${d.awardedMarks!=null?d.awardedMarks:'?'}/${d.totalMarks||'?'} · ${pct}%</div>
+      </div>
+      ${d.topic?`<div style="font-size:12px;color:var(--text2);margin-top:4px">${esEsc(d.subject||'')} · ${esEsc(d.topic)}</div>`:''}
+      <div style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.5">${esEsc((d.question||'').slice(0,160))}${(d.question||'').length>160?'…':''}</div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <span style="font-size:11px;background:var(--bg3);padding:3px 9px;border-radius:20px;color:var(--text2)">${schemeN} scheme sections</span>
+        ${d.band?`<span style="font-size:11px;background:${bandColor}22;color:${bandColor};padding:3px 9px;border-radius:20px;font-weight:700">${esEsc(d.band)}</span>`:''}
+        ${d.markedBy?`<span style="font-size:11px;background:var(--bg3);padding:3px 9px;border-radius:20px;color:var(--text3)">${esEsc(d.markedBy)}</span>`:''}
+      </div>
+    </div>`;
+}
+function esEsc(s){ return (s||'').toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function esUpload(){
+  const d=ES_STATE.parsed;
+  if(!d){ showToast('Load an essay JSON first','rose'); return; }
+  if(!STATE.token){ showToast('Connect Google Drive first','rose'); switchPage('upload'); return; }
+  if(!STATE.folderId){ showToast('Set your root Folder ID first','rose'); switchPage('upload'); return; }
+  document.getElementById('es-steps').innerHTML='';
+  try{
+    const paper=(d.paper||'Other').toString();
+    const safePaper=paper.replace(/[<>:"/\\|?*]/g,'').trim()||'Other';
+    const qno=(d.questionNo||'Q').toString().replace(/[<>:"/\\|?*]/g,'').trim();
+    esStep('ess-folder','active','Building folder path…');
+    const rootId=await getOrCreateFolder(ES_ROOT_FOLDER, STATE.folderId);
+    const paperId=await getOrCreateFolder(safePaper, rootId);
+    esStep('ess-folder','done',`Path: ${ES_ROOT_FOLDER}/${safePaper}`);
+
+    const fileName=`essay__${safePaper}__${qno}.json`;
+    esStep('ess-check','active',`Checking for existing "${fileName}"…`);
+    const anyQ=encodeURIComponent(`name='${fileName.replace(/'/g,"\\'")}' and trashed=false`);
+    const anyR=await driveAPI(`https://www.googleapis.com/drive/v3/files?q=${anyQ}&fields=files(id,name,parents)&pageSize=5`);
+    const existing=((await anyR.json()).files||[])[0]||null;
+    existing?esStep('ess-check','done','Found existing — will overwrite'):esStep('ess-check','done','New essay');
+
+    esStep('ess-up','active','Uploading…');
+    const body=JSON.stringify(d,null,2);
+    if(existing){
+      await driveAPI(`https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=media`,{method:'PATCH',headers:{'Content-Type':'application/json'},body});
+      const curParents=existing.parents||[];
+      if(!curParents.includes(paperId)){
+        await driveAPI(`https://www.googleapis.com/drive/v3/files/${existing.id}?addParents=${paperId}&removeParents=${encodeURIComponent(curParents.join(','))}&fields=id,parents`,{method:'PATCH'});
+      }
+    } else {
+      const meta={ name:fileName, parents:[paperId], mimeType:'application/json' };
+      const form=new FormData();
+      form.append('metadata', new Blob([JSON.stringify(meta)],{type:'application/json'}));
+      form.append('file', new Blob([body],{type:'application/json'}));
+      await driveAPI('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',body:form});
+    }
+    esStep('ess-done','done',`✅ Saved ${fileName} — open OG Revise PWA → ✍️ Essays`);
+    showToast(`✅ Essay ${safePaper} ${qno} saved`,'green');
+  }catch(err){
+    if(err.status===401){ STATE.token=null; setConnected(false); esStep('ess-up','err','Session expired — reconnect Drive'); showToast('Drive session expired','rose'); }
+    else { esStep('ess-up','err',err.message||'Upload failed'); showToast('Upload failed: '+(err.message||''),'rose'); }
+  }
+}
+// Drag & drop
+const esJsonDrop=document.getElementById('es-json-drop');
+if(esJsonDrop){
+  esJsonDrop.addEventListener('dragover',e=>{ e.preventDefault(); esJsonDrop.classList.add('over'); });
+  esJsonDrop.addEventListener('dragleave',()=>esJsonDrop.classList.remove('over'));
+  esJsonDrop.addEventListener('drop',e=>{
+    e.preventDefault(); esJsonDrop.classList.remove('over');
+    const file=e.dataTransfer.files[0];
+    if(file&&(file.name.endsWith('.json')||file.type==='application/json')) esHandleJsonFile(file);
+    else showToast('Please drop a .json file','rose');
+  });
+}
+
+</script>
+</body>
+</html>

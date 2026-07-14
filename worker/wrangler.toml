@@ -1,0 +1,30 @@
+# OG Revise — Cloud Broker
+# Deploy with:  npx wrangler deploy   (from this worker/ directory)
+# Or paste worker/src/index.js into the Cloudflare dashboard editor.
+
+name = "og-revise-broker"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# KV namespace that stores the Google refresh token + short-lived
+# access-token cache. Create it once:
+#   npx wrangler kv namespace create OG_KV
+# then paste the id it prints below (or bind it in the dashboard UI).
+[[kv_namespaces]]
+binding = "OG_KV"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+# Non-secret vars. ALLOWED_ORIGINS = the exact origin(s) your PWA is
+# served from, comma-separated, no trailing slash.
+[vars]
+ALLOWED_ORIGINS = "https://ayesh1991.github.io"
+
+# Secrets — set each one with:  npx wrangler secret put NAME
+# (or dashboard → Worker → Settings → Variables → Secrets)
+#   GOOGLE_CLIENT_ID       xxxx.apps.googleusercontent.com
+#   GOOGLE_CLIENT_SECRET   GOCSPX-…
+#   DRIVE_FOLDER_ID        Drive root folder id of OG-Revise-Infographics
+#   ALLOWED_EMAIL          ayeshmantha@gmail.com
+#   SETUP_KEY              a long random string (guards the /setup URL)
+#   SUPABASE_URL           https://<project-ref>.supabase.co
+#   SUPABASE_ANON_KEY      the project's public anon key

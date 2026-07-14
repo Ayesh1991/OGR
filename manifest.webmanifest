@@ -1,0 +1,35 @@
+{
+  "name": "OG Revise",
+  "short_name": "OG Revise",
+  "description": "OG Revise — private O&G exam revision universe. Infographics, documents, flashcards, SBA/EMQ papers, OSCE and essays for PGIM MD and MRCOG.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#04080f",
+  "theme_color": "#04080f",
+  "categories": ["education", "medical", "productivity"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-192-maskable.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Due today",
+      "short_name": "Due",
+      "description": "Jump straight to today's spaced-repetition reviews",
+      "url": "./?shortcut=due",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Uploader",
+      "short_name": "Upload",
+      "description": "Open the OG Revise uploader tools",
+      "url": "./?shortcut=uploader",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
