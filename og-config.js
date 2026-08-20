@@ -2,15 +2,12 @@
    OG REVISE — CLOUD CONFIGURATION
    ═══════════════════════════════════════════════════════════════
    This is the ONLY file you edit after deploying the backend.
-   Everything here is PUBLIC-SAFE by design:
-     • WORKER_URL is just an address — the Worker refuses anyone
-       whose Supabase login email isn't yours.
-     • The Supabase anon key is designed to be public; row-level
-       security + the Worker's email check do the real guarding.
+   Everything here is PUBLIC-SAFE by design: WORKER_URL is just an
+   address — the Worker refuses anyone whose login email isn't yours.
    No Google client IDs, secrets or Drive folder IDs live in the
-   browser any more — they all sit inside the Cloudflare Worker.
+   browser — they all sit inside the Cloudflare Worker.
 
-   Until you fill these in, the app runs in LEGACY MODE (the old
+   Until WORKER_URL is filled in, the app runs in LEGACY MODE (the old
    client-side OAuth flow) so nothing breaks during migration.
    ═══════════════════════════════════════════════════════════════ */
 window.OG_CONFIG = {
@@ -19,19 +16,27 @@ window.OG_CONFIG = {
      e.g. "https://og-revise-broker.YOUR-SUBDOMAIN.workers.dev"   */
   WORKER_URL: "https://og-revise-broker.ayeshmantha.workers.dev",
 
-  /* Supabase project — Dashboard → Settings → API                */
-  SUPABASE_URL: "https://txlneththpyhyvvgstkc.supabase.co",        // e.g. "https://abcdefgh.supabase.co"
-  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4bG5ldGh0aHB5aHl2dmdzdGtjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNDUxMDQsImV4cCI6MjA5OTYyMTEwNH0.-AC9YTQ6JHPtBOzyFKbRhMyNz98Jf0SyqEMR-dpxHNQ",   // the public "anon" key
+  /* ── LOGIN ────────────────────────────────────────────────────
+     Leave these two BLANK to use worker-native login: the sign-in
+     code is generated and emailed by your own Cloudflare Worker
+     (via Resend), and the session is a token the Worker signs.
+     No third-party identity service, no database, no monthly cost —
+     and supabase-js is never even downloaded, so the app boots faster.
 
-  /* Shown on the login screen as a hint (enforcement is server-side
-     in the Worker via its ALLOWED_EMAIL secret).                  */
+     They only exist for the legacy Supabase login. Filling them in
+     switches back to it, which is handy for a no-downtime migration:
+     deploy the new Worker first, then blank these, then delete the
+     Supabase project.                                              */
+  SUPABASE_URL: "",
+  SUPABASE_ANON_KEY: "",
+
+  /* Prefilled on the login screen. The real enforcement is the
+     Worker's ALLOWED_EMAIL secret, server-side.                    */
   OWNER_EMAIL: "ayeshmantha@gmail.com",
 
-  /* Show a "Continue with Google" button on the login screen.
-     Requires enabling the Google provider inside Supabase Auth.
-     The 6-digit email code always works and needs no extra setup. */
+  /* "Continue with Google" button — legacy Supabase mode only.     */
   ENABLE_GOOGLE_LOGIN: false,
 
-  /* Force the old in-browser OAuth flow even if the above is set. */
+  /* Force the old in-browser OAuth flow even if the above is set.  */
   LEGACY_MODE: false
 };
