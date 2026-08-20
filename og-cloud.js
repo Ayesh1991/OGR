@@ -32,10 +32,18 @@
   var IS_EMBED = /[?&]embed=1/.test(location.search);      // uploader inside PWA iframe
   var IS_POPUP = !!(window.opener && location.hash.indexOf('access_token') >= 0);
 
-  var enabled = !!(CFG.WORKER_URL && CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY)
-                && !CFG.LEGACY_MODE && !IS_EMBED && !IS_POPUP;
+  /* AUTH MODE
+     'worker'   — login lives entirely in your Cloudflare Worker (default).
+                  No third-party identity service, no extra cost, and the
+                  supabase-js library is never even downloaded.
+     'supabase' — legacy: used only while SUPABASE_URL + SUPABASE_ANON_KEY
+                  are still filled in, so you can migrate with no downtime. */
+  var MODE = (CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY) ? 'supabase' : 'worker';
 
-  var sb = null;               // supabase client
+  var enabled = !!CFG.WORKER_URL && !CFG.LEGACY_MODE && !IS_EMBED && !IS_POPUP;
+
+  var SESS_KEY = 'og_sess_v1';
+  var sb = null;               // supabase client (legacy mode only)
   var userEmail = '';
   var pendingToken = null;     // token that arrived before host app was ready
   var appIsReady = false;
@@ -48,6 +56,7 @@
   /* ── public API (always present, even when disabled) ───────────── */
   window.OGCloud = {
     enabled: enabled,
+    mode: MODE,
     email: function () { return userEmail || localStorage.getItem('og_cloud_email') || ''; },
     refreshToken: refreshToken,
     signOut: signOut,
@@ -100,6 +109,34 @@
     return loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
   }
 
+  /* ═══════════════════ session token (both modes) ═══════════════════ */
+  function storedSession() {
+    try { return JSON.parse(localStorage.getItem(SESS_KEY) || 'null'); } catch (e) { return null; }
+  }
+  function saveSession(token, expiresAt, email) {
+    try {
+      localStorage.setItem(SESS_KEY, JSON.stringify({ t: token, x: expiresAt || 0, e: email || userEmail || '' }));
+    } catch (e) {}
+  }
+  function clearSession() { try { localStorage.removeItem(SESS_KEY); } catch (e) {} }
+
+  /** Resolves to the bearer token to present to the Worker, or null. */
+  function currentJwt() {
+    if (MODE === 'worker') {
+      var s = storedSession();
+      if (!s || !s.t) return Promise.resolve(null);
+      if (s.x && s.x < Date.now()) { clearSession(); return Promise.resolve(null); }
+      return Promise.resolve(s.t);
+    }
+    return ensureSupabase().then(function () {
+      if (!sb) sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
+      return sb.auth.getSession();
+    }).then(function (r) {
+      var session = r && r.data && r.data.session;
+      return session ? session.access_token : null;
+    });
+  }
+
   /* ═══════════════════════════ boot ═══════════════════════════ */
   function boot() {
     injectGate();
@@ -107,6 +144,9 @@
     ensureGsap().then(introAnimation);
     if (!REDUCED) { ensureThree().then(startScene).catch(function(){}); }
 
+    if (MODE === 'worker') { resumeSession(); return; }
+
+    /* ── legacy Supabase mode ── */
     ensureSupabase().then(function () {
       sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, {
         auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
@@ -133,45 +173,69 @@
   }
 
   function resumeSession() {
-    if (!sb) return;
-    sb.auth.getSession().then(function (r) {
-      var session = r && r.data && r.data.session;
-      if (!session) {
-        if (!navigator.onLine && localStorage.getItem('og_cloud_email')) { revealApp(); return; }
+    currentJwt().then(function (jwt) {
+      if (!jwt) {
+        /* No stored login. If this device signed in before and is plainly
+           offline, open the cached library rather than blocking study. */
+        if (!navigator.onLine && localStorage.getItem('og_cloud_email')) { revealApp(); armReconnect(); return; }
         setState('signin');
         return;
       }
-      if (!navigator.onLine) {
-        /* Offline with a stored session → trust the local login and let
-           the cached library open. Tokens refresh when we're back online. */
-        userEmail = localStorage.getItem('og_cloud_email') || '';
-        revealApp();
-        window.addEventListener('online', function once() {
-          window.removeEventListener('online', once);
-          verifyAndEnter(session, true);
-        });
-        return;
-      }
-      verifyAndEnter(session, false);
+      /* We have a login → always ATTEMPT to verify and fetch a Drive token.
+         navigator.onLine is an unreliable signal (captive portals, webviews,
+         installed PWAs), so we never let it stop us from trying: if the
+         network really is down the request fails fast and the catch below
+         opens the cached library and arms a retry. */
+      verifyAndEnter(jwt, false);
+    }).catch(function () {
+      if (localStorage.getItem('og_cloud_email')) { revealApp(); armReconnect(); }
+      else setState('signin');
     });
   }
 
-  function verifyAndEnter(session, silent) {
-    workerFetch('/api/session', session.access_token).then(function (res) {
+  /* Keep trying to get a Drive token after a failed start — on the next
+     'online' event, and on a timer, so a bad first attempt never leaves
+     the app permanently disconnected. */
+  var reconnectArmed = false;
+  function armReconnect() {
+    if (reconnectArmed) return;
+    reconnectArmed = true;
+    var tries = 0;
+    var attempt = function () {
+      if (tokenState.token && tokenState.exp > Date.now()) { disarm(); return; }
+      tries++;
+      refreshToken(true).then(function (t) {
+        if (t) disarm();
+        else if (tries < 6) setTimeout(attempt, Math.min(60000, 8000 * tries));
+        else disarm();
+      });
+    };
+    var onOnline = function () { attempt(); };
+    function disarm() { reconnectArmed = false; window.removeEventListener('online', onOnline); }
+    window.addEventListener('online', onOnline);
+    setTimeout(attempt, 8000);
+  }
+
+  function verifyAndEnter(jwt, silent) {
+    workerFetch('/api/session', jwt).then(function (res) {
       if (res.status === 403) { setState('denied'); return; }
+      if (res.status === 401) { clearSession(); setState('signin'); return; }
       if (!res.ok) throw new Error('broker ' + res.status);
       return res.json().then(function (d) {
         userEmail = d.email || '';
         try { localStorage.setItem('og_cloud_email', userEmail); } catch (e) {}
+        /* The Worker reissues long-lived sessions before they lapse. */
+        if (d.token) saveSession(d.token, d.expires_at, userEmail);
         decorateEmail();
-        return fetchDriveToken(session.access_token).then(function () {
+        return fetchDriveToken(d.token || jwt).then(function () {
           if (!silent) revealApp();
         });
       });
     }).catch(function (err) {
       if (silent) return;
-      /* Broker unreachable but login is valid → run from cache. */
-      if (localStorage.getItem('og_cloud_email')) { revealApp(); gateToastLate(err); }
+      /* Broker unreachable but login is valid → run from cache and keep
+         trying in the background so Drive comes back on its own. */
+      if (localStorage.getItem('og_cloud_email')) { revealApp(); gateToastLate(err); armReconnect(); }
       else setState('error', brokerErrText(err));
     });
   }
@@ -202,6 +266,8 @@
           e.code = d.error; throw e;
         }
         tokenState = { token: d.access_token, exp: d.expires_at, folderId: d.folder_id || '' };
+        /* Worker rolls the login session forward as it nears expiry. */
+        if (d.session_token) saveSession(d.session_token, d.session_expires_at, userEmail);
         try {
           sessionStorage.setItem('og_tok', d.access_token);
           sessionStorage.setItem('og_exp', String(d.expires_at));
@@ -233,13 +299,9 @@
       return Promise.resolve(tokenState.token);
     }
     if (inflight) return inflight;
-    inflight = ensureSupabase().then(function () {
-      if (!sb) sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
-      return sb.auth.getSession();
-    }).then(function (r) {
-      var session = r && r.data && r.data.session;
-      if (!session) { setStateIfGate('signin'); return null; }
-      return fetchDriveToken(session.access_token);
+    inflight = currentJwt().then(function (jwt) {
+      if (!jwt) { setStateIfGate('signin'); return null; }
+      return fetchDriveToken(jwt);
     }).catch(function (err) {
       console.warn('OGCloud refresh failed:', err && err.message);
       if (err && (err.code === 'setup_required' || err.code === 'reauth_needed')) {
@@ -259,7 +321,10 @@
   /* Renew eagerly when the PWA is resumed or connectivity returns —
      this is exactly the moment the old app used to get stuck syncing. */
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible' && tokenState.exp && tokenState.exp - Date.now() < 10 * 60000) {
+    if (document.visibilityState !== 'visible') return;
+    /* Refresh when the token is near expiry OR when we never got one
+       (e.g. the app opened from cache while the network was down). */
+    if (tokenState.exp - Date.now() < 10 * 60000 && localStorage.getItem('og_cloud_email')) {
       refreshToken(true);
     }
   });
@@ -275,11 +340,39 @@
   /* ═══════════════════════ auth actions ═══════════════════════ */
   var lastEmailSentTo = '';
 
+  /** POST JSON to the Worker without a bearer token (login endpoints). */
+  function workerPost(path, body) {
+    return fetch(CFG.WORKER_URL.replace(/\/$/, '') + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        return { ok: r.ok, status: r.status, data: d };
+      });
+    });
+  }
+
   function sendCode() {
     var input = document.getElementById('ogg-email');
     var email = (input && input.value || '').trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { gateError('Enter a valid email address'); return; }
     gateBusy(true);
+
+    if (MODE === 'worker') {
+      workerPost('/api/auth/start', { email: email }).then(function (r) {
+        gateBusy(false);
+        if (!r.ok) { gateError(r.data.message || 'Could not send the code (' + r.status + ')'); return; }
+        lastEmailSentTo = email;
+        setState('code');
+      }).catch(function (e) {
+        gateBusy(false);
+        gateError('Could not reach the cloud broker — check your connection.');
+        console.warn('OGCloud auth/start:', e);
+      });
+      return;
+    }
+
     sb.auth.signInWithOtp({ email: email, options: { emailRedirectTo: location.origin + location.pathname } })
       .then(function (r) {
         gateBusy(false);
@@ -294,6 +387,24 @@
     var code = (el && el.value || '').replace(/\D/g, '');
     if (code.length < 4) { gateError('Enter the code from your email'); return; }
     gateBusy(true);
+
+    if (MODE === 'worker') {
+      workerPost('/api/auth/verify', { email: lastEmailSentTo, code: code }).then(function (r) {
+        gateBusy(false);
+        if (!r.ok || !r.data.token) { gateError(r.data.message || 'Code not accepted — check it and try again'); return; }
+        userEmail = r.data.email || lastEmailSentTo;
+        saveSession(r.data.token, r.data.expires_at, userEmail);
+        try { localStorage.setItem('og_cloud_email', userEmail); } catch (e) {}
+        setState('checking');
+        verifyAndEnter(r.data.token, false);
+      }).catch(function (e) {
+        gateBusy(false);
+        gateError('Could not reach the cloud broker — check your connection.');
+        console.warn('OGCloud auth/verify:', e);
+      });
+      return;
+    }
+
     sb.auth.verifyOtp({ email: lastEmailSentTo, token: code, type: 'email' })
       .then(function (r) {
         gateBusy(false);
@@ -313,7 +424,8 @@
   function signOut() {
     try { localStorage.removeItem('og_cloud_email'); } catch (e) {}
     try { sessionStorage.removeItem('og_tok'); sessionStorage.removeItem('og_exp'); } catch (e) {}
-    if (sb) sb.auth.signOut(); else location.reload();
+    clearSession();
+    if (MODE === 'supabase' && sb) sb.auth.signOut(); else location.reload();
   }
 
   /* ═══════════════════════ settings panel ═══════════════════════ */
@@ -337,7 +449,8 @@
           '<button class="ogc-btn" id="ogc-refresh-btn">↻ Refresh token</button>' +
           '<button class="ogc-btn danger" id="ogc-signout-btn">Sign out</button>' +
         '</div>' +
-        '<div class="ogc-acct-note">Secrets (client ID, folder ID) now live in your Cloudflare Worker — nothing sensitive is stored in this browser.</div>' +
+        '<div class="ogc-acct-note">Secrets (client ID, folder ID) live in your Cloudflare Worker — nothing sensitive is stored in this browser. Sign-in is handled by ' +
+          (MODE === 'worker' ? 'the Worker itself' : 'Supabase') + '.</div>' +
       '</div>';
     var rb = el.querySelector('#ogc-refresh-btn');
     var sob = el.querySelector('#ogc-signout-btn');
@@ -414,7 +527,7 @@
           '<input id="ogg-email" class="ogg-input" type="email" inputmode="email" autocomplete="email" ' +
             'value="' + escHtml(hint) + '" placeholder="you@example.com">' +
           '<button class="ogg-btn primary" id="ogg-send-btn">Email me a sign-in code&nbsp;→</button>' +
-          (CFG.ENABLE_GOOGLE_LOGIN
+          (CFG.ENABLE_GOOGLE_LOGIN && MODE === 'supabase'
             ? '<div class="ogg-or"><i></i><em>or</em><i></i></div>' +
               '<button class="ogg-btn ghost" id="ogg-google-btn"><svg width="15" height="15" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.3 6.1 29.4 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.3 6.1 29.4 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.3 0-9.7-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C41.4 34.9 44 29.9 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>&nbsp;Continue with Google</button>'
             : '') +
